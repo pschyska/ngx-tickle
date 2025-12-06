@@ -1,0 +1,4 @@
+use flake
+
+export NGX_CFLAGS="$(pkg-config --cflags openssl zlib)"
+export NGX_LDFLAGS="$(pkg-config --libs openssl zlib)"
