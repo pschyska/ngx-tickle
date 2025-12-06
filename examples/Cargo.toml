@@ -1,0 +1,25 @@
+[package]
+
+name = "examples"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+autobins = false
+
+[dependencies]
+ngx-tickle = { path = ".." }
+
+ngx = { version = "0.5", features = ["vendored", "async"]}
+nginx-sys = { version = "0.5" }
+futures = "0.3"
+
+[build-dependencies]
+anyhow = "1.0"
+cargo_metadata = "0.23"
+
+[[example]]
+name = "sidecar"
+path = "sidecar.rs"
+crate-type = ["cdylib"]

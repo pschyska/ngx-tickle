@@ -1,0 +1,22 @@
+[workspace]
+members = [
+    "examples",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pschyska/ngx-tickle"
+
+[package]
+name = "ngx-tickle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+autoexamples = false
+
+[dependencies]
+ngx = { version = "0.5", features = ["vendored"]}
+nginx-sys = { version = "0.5" }
