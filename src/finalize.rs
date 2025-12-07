@@ -4,7 +4,7 @@ use nginx_sys::{
     ngx_delete_posted_event, ngx_event_t, ngx_http_finalize_request, ngx_http_request_t, ngx_int_t,
     ngx_post_event, ngx_posted_events,
 };
-use ngx::core::Status;
+use ngx::core::{Pool, Status};
 use ngx::http::Request;
 use ngx::log::ngx_cycle_log;
 
@@ -23,14 +23,17 @@ impl Drop for Finalization {
 }
 
 /// Finalize Request by posting a ngx_event_t. This allows async tasks to finish normally.
+/// SAFETY:
+/// - Must only be run in the event loop thread — i.e. in a nginx handler or from an async task
+///   spawned by this crate.
 pub fn finalize_request(request: &mut Request, rc: Status) {
+    let request: *mut ngx_http_request_t = request.into();
     unsafe {
-        let pool = request.pool();
+        let pool = Pool::from_ngx_pool((*request).pool);
         let mut event: ngx_event_t = mem::zeroed();
         event.handler = Some(fini);
         event.log = ngx_cycle_log().as_ptr();
 
-        let request: *mut ngx_http_request_t = request.into();
         let rc = rc.0;
         let fin = pool.allocate(Finalization { event, request, rc });
         (*fin).event.data = fin.cast();

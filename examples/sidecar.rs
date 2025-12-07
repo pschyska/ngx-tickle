@@ -1,5 +1,8 @@
+use std::ffi::{c_char, c_void};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
 use nginx_sys::ngx_http_request_t;
-use ngx::async_::{Task, spawn};
 use ngx::core::{self, Status};
 use ngx::ffi::{
     NGX_CONF_TAKE1, NGX_HTTP_LOC_CONF, NGX_HTTP_LOC_CONF_OFFSET, NGX_HTTP_MODULE, NGX_LOG_EMERG,
@@ -9,8 +12,10 @@ use ngx::ffi::{
 use ngx::http::{self, HTTPStatus, HttpModule, MergeConfigError, Request};
 use ngx::http::{HttpModuleLocationConf, HttpModuleMainConf, NgxHttpCoreModule};
 use ngx::{http_request_handler, ngx_conf_log_error, ngx_modules, ngx_string};
-use ngx_tickle::finalize::finalize_request;
-use std::ffi::{c_char, c_void};
+
+use ngx_tickle::finalize_request;
+use ngx_tickle::{Task, spawn};
+use tokio::runtime::Runtime;
 
 struct Module;
 
@@ -114,9 +119,20 @@ impl http::Merge for ModuleConfig {
 }
 
 async fn async_handler(request: &mut Request) {
-    request.headers_in_iterator().for_each(|(k, v)| {
-        println!("{k} = {v}");
-    });
+    // spawn a task on the sidecar runtime
+    let elapsed = tokio_runtime()
+        .spawn(async move {
+            // do not call nginx functions or refer to nginx-owned data in here, as this future is
+            // not executing on the nginx main thread!
+            let start = Instant::now();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            // instead, return the result of the execution to the main future…
+            Instant::now().duration_since(start)
+        })
+        .await
+        .expect("join");
+    // …which can then safely update request.
+    request.add_header_out("x-tokio-time", &format!("{elapsed:?}"));
     finalize_request(request, HTTPStatus::NO_CONTENT.into());
 }
 
@@ -151,3 +167,13 @@ http_request_handler!(handler, |request: &mut http::Request| {
 
     core::Status::NGX_AGAIN
 });
+
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+fn tokio_runtime() -> &'static Runtime {
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    })
+}

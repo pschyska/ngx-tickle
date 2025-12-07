@@ -10,10 +10,10 @@ autobins = false
 
 [dependencies]
 ngx-tickle = { path = ".." }
-
-ngx = { version = "0.5", features = ["vendored", "async"]}
-nginx-sys = { version = "0.5" }
 futures = "0.3"
+nginx-sys = "0.5"
+ngx = "0.5"
+tokio = { version="1.48", features = ["rt-multi-thread", "time", "fs"] }
 
 [build-dependencies]
 anyhow = "1.0"
