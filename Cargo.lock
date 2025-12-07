@@ -151,6 +151,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
 name = "duct"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -194,6 +209,7 @@ dependencies = [
  "nginx-sys",
  "ngx",
  "ngx-tickle",
+ "tokio",
 ]
 
 [[package]]
@@ -465,16 +481,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3cafa4700c0836055c5c78ba9defc418cea187d92ac65478bb7053a5a1d39775"
 dependencies = [
  "allocator-api2",
- "async-task",
  "lock_api",
  "nginx-sys",
- "pin-project-lite",
 ]
 
 [[package]]
 name = "ngx-tickle"
 version = "0.1.0"
 dependencies = [
+ "async-task",
+ "crossbeam-channel",
  "nginx-sys",
  "ngx",
 ]
@@ -833,6 +849,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tokio"
+version = "1.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff360e02eab121e0bc37a2d3b4d4dc622e6eda3a8e5253d5435ecf5bd4c68408"
+dependencies = [
+ "pin-project-lite",
 ]
 
 [[package]]

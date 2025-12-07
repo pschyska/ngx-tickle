@@ -11,6 +11,7 @@ repository = "https://github.com/pschyska/ngx-tickle"
 
 [package]
 name = "ngx-tickle"
+description = "tools for async nginx modules"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,5 +19,12 @@ repository.workspace = true
 autoexamples = false
 
 [dependencies]
-ngx = { version = "0.5", features = ["vendored"]}
-nginx-sys = { version = "0.5" }
+async-task = "4.7"
+crossbeam-channel = "0.5"
+nginx-sys = "0.5"
+ngx = "0.5"
+
+[features]
+default = ["eventfd", "vendored"]
+vendored = ["ngx/vendored"]
+eventfd = []
