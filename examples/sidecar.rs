@@ -123,14 +123,16 @@ impl http::Merge for ModuleConfig {
 }
 
 async fn non_blocking_io() -> Result<()> {
-    let mut buf = [0u8; 1 << 20];
+    let mut buf = Vec::with_capacity(1 << 20);
+    buf.resize(1 << 20, 0);
     let mut file = tokio::fs::File::open("/dev/zero").await?;
     file.read_exact(&mut buf).await?;
     Ok(())
 }
 
 fn blocking_io() -> Result<()> {
-    let mut buf = [0u8; 1 << 20];
+    let mut buf = Vec::with_capacity(1 << 20);
+    buf.resize(1 << 20, 0);
     let mut file = std::fs::File::open("/dev/zero")?;
     file.read_exact(&mut buf)?;
     Ok(())
