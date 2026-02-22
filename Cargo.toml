@@ -25,6 +25,9 @@ nginx-sys = "0.5"
 ngx = "0.5"
 libc = "0.2"
 
+[build-dependencies]
+cc = "1.2"
+
 [features]
 default = ["vendored"]
 vendored = ["ngx/vendored"]

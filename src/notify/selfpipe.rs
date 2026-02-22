@@ -1,16 +1,13 @@
 use std::ffi::c_void;
-use std::mem::{self, MaybeUninit};
+use std::mem;
 use std::sync::OnceLock;
 
-use libc::{
-    AF_UNIX, EPOLLET, EPOLLIN, EPOLLRDHUP, O_CLOEXEC, O_NONBLOCK, SOCK_CLOEXEC, SOCK_NONBLOCK,
-    SOCK_RAW, c_int, pipe2, read, socketpair, write,
-};
-use nginx_sys::{NGX_OK, ngx_connection_t, ngx_cycle, ngx_event_actions, ngx_event_t};
-use ngx::http::{HttpModuleLocationConf, HttpModuleMainConf, NgxHttpCoreModule};
+use libc::{O_CLOEXEC, O_NONBLOCK, pipe2, read, write};
+use nginx_sys::{NGX_OK, ngx_connection_t, ngx_event_t};
 use ngx::log::ngx_cycle_log;
 use ngx::ngx_log_debug;
 
+use super::ngx_tickle_add_read_event;
 use crate::spawn::async_handler;
 
 struct NotifyContext {
@@ -61,19 +58,14 @@ fn ensure_init() {
         ctx.wev.log = log;
         ctx.wev.data = (&raw mut ctx.c).cast();
 
-        let rc = unsafe {
-            ngx_event_actions.add.unwrap()(
-                &raw mut ctx.rev,
-                (EPOLLIN | EPOLLRDHUP) as isize, // TODO: stubs for nginx macros
-                EPOLLET as usize,
-            )
-        };
+        let rc = unsafe { ngx_tickle_add_read_event(&raw mut ctx.rev) };
         if rc != NGX_OK as isize {
             panic!("tickle: ngx_add_event == {rc}");
         }
     });
 }
 
+#[allow(dead_code)]
 pub(crate) fn tickle() {
     ensure_init();
 
@@ -87,7 +79,7 @@ pub(crate) fn tickle() {
     }
 }
 
-/// drain pipe — called from async_handler
+#[allow(dead_code)]
 pub(crate) fn on_tickled() {
     let mut buf: u64 = 0;
     let ptr = &mut buf as *mut u64 as *mut c_void;

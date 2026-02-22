@@ -1,3 +1,5 @@
+use std::env;
+
 fn main() {
     #[cfg(target_os = "macos")]
     {
@@ -12,7 +14,13 @@ fn main() {
         std::env::var("DEP_NGINX_OS_CHECK").unwrap_or("any()".to_string())
     );
     println!("cargo::rerun-if-env-changed=DEP_NGINX_OS");
-    if let Ok(os) = std::env::var("DEP_NGINX_OS") {
+    if let Ok(os) = env::var("DEP_NGINX_OS") {
         println!("cargo::rustc-cfg=ngx_os=\"{os}\"");
     }
+
+    let include = env::var("DEP_NGINX_INCLUDE").expect("DEP_NGINX_INCLUDE");
+    cc::Build::new()
+        .file("src/ffi/expand.c")
+        .includes(env::split_paths(&include))
+        .compile("expand");
 }

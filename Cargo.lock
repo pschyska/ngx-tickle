@@ -491,6 +491,7 @@ name = "ngx-tickle"
 version = "0.1.0"
 dependencies = [
  "async-task",
+ "cc",
  "crossbeam-channel",
  "libc",
  "nginx-sys",

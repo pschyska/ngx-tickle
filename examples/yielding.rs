@@ -18,6 +18,84 @@ use ngx::{http_request_handler, ngx_conf_log_error, ngx_modules, ngx_string};
 use ngx_tickle::{Task, spawn};
 use ngx_tickle::{finalize_request, set_max_runnables_per_wakeup};
 
+fn yield_now() -> impl Future<Output = ()> {
+    let mut yielded = false;
+    future::poll_fn(move |cx| {
+        if std::mem::replace(&mut yielded, true) {
+            Poll::Ready(())
+        } else {
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
+}
+
+// A future might choose to yield itself to not block the nginx event loop for too long. In this
+// case, the Scheduler forces a round-trip through the queue and triggers another notify event,
+// even when already on the event-loop thread. This allows for other events to be processed in
+// the meantime.
+async fn yielding_handler(request: &mut Request) -> Result<()> {
+    let start = Instant::now();
+
+    let mut tasks = vec![];
+    for _ in 0..100 {
+        tasks.push(spawn(async move {
+            yield_now().await;
+        }));
+    }
+    join_all(tasks).await;
+    let elapsed = Instant::now().duration_since(start);
+    request.add_header_out(&format!("x-yielding-time"), &format!("{elapsed:?}"));
+
+    finalize_request(request, HTTPStatus::NO_CONTENT.into());
+    Ok(())
+}
+
+// used in ngx_module_t definition below
+extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
+    // The queue limits the maximum number of runnables run per wakeup to not starve nginx I/O
+    // events. The default of 8 can be changed like this.
+    // Lower values provide more fairness, but incur more overhead.
+    set_max_runnables_per_wakeup(1);
+    Status::NGX_OK.into()
+}
+
+// --- http handler ---
+
+#[derive(Default)]
+struct RequestCTX {
+    task: Option<Task<()>>,
+}
+
+http_request_handler!(handler, |request: &mut http::Request| {
+    let co = Module::location_conf(request).expect("module config is none");
+
+    if !co.enable.unwrap_or(false) {
+        return Status::NGX_DECLINED;
+    }
+
+    let ctx = request.pool().allocate(RequestCTX::default());
+    if ctx.is_null() {
+        return Status::NGX_ERROR;
+    }
+    request.set_module_ctx(ctx.cast(), unsafe {
+        (&raw const yielding).as_ref().unwrap()
+    });
+    let ctx = unsafe { ctx.as_mut() }.unwrap();
+
+    let r: *mut ngx_http_request_t = request.into();
+
+    // set task on ctx so it will be aborted on request cancellation via its Drop
+    ctx.task = Some(spawn(async move {
+        let request = unsafe { Request::from_ngx_http_request(r) };
+        yielding_handler(request).await.unwrap();
+    }));
+
+    Status::NGX_AGAIN
+});
+
+// --- module setup ---
+
 struct Module;
 
 impl http::HttpModule for Module {
@@ -61,14 +139,6 @@ static MODULE_CTX: ngx_http_module_t = ngx_http_module_t {
     create_loc_conf: Some(Module::create_loc_conf),
     merge_loc_conf: Some(Module::merge_loc_conf),
 };
-
-extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
-    // The queue limits the maximum number of runnables run per wakeup to not starve nginx I/O
-    // events. The default of 8 can be changed like this.
-    // Lower values provide more fairness, but incur more overhead.
-    set_max_runnables_per_wakeup(1);
-    Status::NGX_OK.into()
-}
 
 #[used]
 #[allow(non_upper_case_globals)]
@@ -131,68 +201,3 @@ impl http::Merge for ModuleConfig {
         Ok(())
     }
 }
-
-fn yield_now() -> impl Future<Output = ()> {
-    let mut yielded = false;
-    future::poll_fn(move |cx| {
-        if std::mem::replace(&mut yielded, true) {
-            Poll::Ready(())
-        } else {
-            cx.waker().wake_by_ref();
-            Poll::Pending
-        }
-    })
-}
-
-// A future might choose to yield itself to not block the nginx event loop for too long. In this
-// case, the Scheduler forces a round-trip through the queue and triggers another notify event,
-// even when already on the event-loop thread. This allows for other events to be processed in
-// the meantime.
-async fn yielding_handler(request: &mut Request) -> Result<()> {
-    let start = Instant::now();
-
-    let mut tasks = vec![];
-    for _ in 0..100 {
-        tasks.push(spawn(async move {
-            yield_now().await;
-        }));
-    }
-    join_all(tasks).await;
-    let elapsed = Instant::now().duration_since(start);
-    request.add_header_out(&format!("x-yielding-time"), &format!("{elapsed:?}"));
-
-    finalize_request(request, HTTPStatus::NO_CONTENT.into());
-    Ok(())
-}
-
-#[derive(Default)]
-struct RequestCTX {
-    task: Option<Task<()>>,
-}
-
-http_request_handler!(handler, |request: &mut http::Request| {
-    let co = Module::location_conf(request).expect("module config is none");
-
-    if !co.enable.unwrap_or(false) {
-        return Status::NGX_DECLINED;
-    }
-
-    let ctx = request.pool().allocate(RequestCTX::default());
-    if ctx.is_null() {
-        return Status::NGX_ERROR;
-    }
-    request.set_module_ctx(ctx.cast(), unsafe {
-        (&raw const yielding).as_ref().unwrap()
-    });
-    let ctx = unsafe { ctx.as_mut() }.unwrap();
-
-    let r: *mut ngx_http_request_t = request.into();
-
-    // set task on ctx so it will be aborted on request cancellation via its Drop
-    ctx.task = Some(spawn(async move {
-        let request = unsafe { Request::from_ngx_http_request(r) };
-        yielding_handler(request).await.unwrap();
-    }));
-
-    Status::NGX_AGAIN
-});
