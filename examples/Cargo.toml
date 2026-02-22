@@ -11,15 +11,25 @@ autobins = false
 [dependencies]
 ngx-tickle = { path = ".." }
 futures = "0.3"
+futures-util = "0.3"
 nginx-sys = "0.5"
 ngx = "0.5"
-tokio = { version="1.48", features = ["rt-multi-thread", "time", "fs"] }
+tokio = { version="1.49", features = ["rt-multi-thread", "time", "fs", "io-util"] }
+anyhow = "1.0"
 
 [build-dependencies]
 anyhow = "1.0"
 cargo_metadata = "0.23"
 
+[features]
+selfpipe = ["ngx-tickle/selfpipe"]
+
 [[example]]
 name = "sidecar"
 path = "sidecar.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "yielding"
+path = "yielding.rs"
 crate-type = ["cdylib"]

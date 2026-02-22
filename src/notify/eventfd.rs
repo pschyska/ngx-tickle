@@ -2,10 +2,11 @@ use std::ffi::c_void;
 use std::mem;
 use std::sync::OnceLock;
 
-use nginx_sys::{
-    EFD_CLOEXEC, EFD_NONBLOCK, EPOLL_EVENTS_EPOLLET, EPOLL_EVENTS_EPOLLIN, EPOLL_EVENTS_EPOLLRDHUP,
-    NGX_OK, eventfd, ngx_connection_t, ngx_event_actions, ngx_event_t, read, write,
+use libc::{
+    EPOLLET, EPOLLIN, EPOLLRDHUP, O_CLOEXEC, O_NONBLOCK, eventfd, eventfd_read, eventfd_t,
+    eventfd_write,
 };
+use nginx_sys::{NGX_OK, ngx_connection_t, ngx_event_actions, ngx_event_t};
 use ngx::log::ngx_cycle_log;
 use ngx::ngx_log_debug;
 
@@ -26,14 +27,12 @@ static mut CTX: NotifyContext = NotifyContext {
 
 static INIT: OnceLock<()> = OnceLock::new();
 
-extern "C" fn _dummy_write_handler(_ev: *mut ngx_event_t) {}
-
 fn ensure_init() {
     let _ = INIT.get_or_init(|| {
-        let fd = unsafe { eventfd(0, (EFD_NONBLOCK | EFD_CLOEXEC).try_into().unwrap()) };
+        let fd = unsafe { eventfd(0, (O_NONBLOCK | O_CLOEXEC).try_into().unwrap()) };
 
         if fd == -1 {
-            panic!("tickle: eventfd = -1");
+            panic!("tickle: eventfd == -1");
         }
 
         #[allow(clippy::deref_addrof)]
@@ -53,12 +52,11 @@ fn ensure_init() {
 
         ctx.wev.log = log;
         ctx.wev.data = (&raw mut ctx.c).cast();
-        ctx.wev.handler = Some(_dummy_write_handler); // can't be null
         let rc = unsafe {
             ngx_event_actions.add.unwrap()(
                 &raw mut ctx.rev,
-                (EPOLL_EVENTS_EPOLLIN | EPOLL_EVENTS_EPOLLRDHUP) as isize,
-                EPOLL_EVENTS_EPOLLET as usize,
+                (EPOLLIN | EPOLLRDHUP) as isize,
+                EPOLLET as usize,
             )
         };
         if rc != NGX_OK as isize {
@@ -72,10 +70,8 @@ fn ensure_init() {
 pub(crate) fn tickle() {
     ensure_init();
 
-    let val: u64 = 1;
-    let ptr = &val as *const u64 as *const c_void;
-    let res = unsafe { write(CTX.fd, ptr, core::mem::size_of::<u64>()) };
-    if res != core::mem::size_of::<u64>() as isize {
+    let res = unsafe { eventfd_write(CTX.fd, 1) };
+    if res != 0 {
         panic!("tickle: eventfd write failed: {res}");
     }
 
@@ -84,7 +80,6 @@ pub(crate) fn tickle() {
 
 /// drain eventfd — called from async_handler
 pub(crate) fn on_tickled() {
-    let mut buf: u64 = 0;
-    let ptr = &mut buf as *mut u64 as *mut c_void;
-    let _ = unsafe { read(CTX.fd, ptr, core::mem::size_of::<u64>()) };
+    let mut buf: eventfd_t = 0;
+    let _ = unsafe { eventfd_read(CTX.fd, &raw mut buf) };
 }

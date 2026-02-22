@@ -1,5 +1,5 @@
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 
 pub use async_task::Task;
 use async_task::{Runnable, ScheduleInfo, WithInfo};
@@ -19,12 +19,18 @@ pub fn on_main_thread() -> bool {
     main_tid == tid
 }
 
+static MAX_RUNNABLES_PER_WAKEUP: AtomicU32 = AtomicU32::new(8);
+
+pub fn set_max_runnables_per_wakeup(value: u32) {
+    MAX_RUNNABLES_PER_WAKEUP.store(value, Ordering::Relaxed);
+}
+
 pub(crate) extern "C" fn async_handler(_ev: *mut ngx_event_t) {
+    on_tickled();
     // initialize MAIN_TID on first execution
     let tid = unsafe { ngx_thread_tid().into() };
     let _ = MAIN_TID.compare_exchange(-1, tid, Ordering::Relaxed, Ordering::Relaxed);
-
-    on_tickled();
+    let limit = MAX_RUNNABLES_PER_WAKEUP.load(Ordering::Relaxed);
 
     let scheduler = scheduler();
 
@@ -35,6 +41,15 @@ pub(crate) extern "C" fn async_handler(_ev: *mut ngx_event_t) {
     while let Ok(r) = scheduler.rx.try_recv() {
         r.run();
         cnt += 1;
+        if cnt > limit {
+            ngx_log_debug!(
+                ngx_cycle_log().as_ptr(),
+                "tickle: suspend processing after {limit} items"
+            );
+            // re-schedule ourselves
+            tickle();
+            return;
+        }
     }
     ngx_log_debug!(ngx_cycle_log().as_ptr(), "tickle: processed {cnt} items");
 }

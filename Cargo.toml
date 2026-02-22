@@ -23,8 +23,9 @@ async-task = "4.7"
 crossbeam-channel = "0.5"
 nginx-sys = "0.5"
 ngx = "0.5"
+libc = "0.2"
 
 [features]
-default = ["eventfd", "vendored"]
+default = ["vendored"]
 vendored = ["ngx/vendored"]
-eventfd = []
+selfpipe = []

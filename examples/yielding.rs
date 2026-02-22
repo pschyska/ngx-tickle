@@ -1,11 +1,10 @@
 use std::ffi::{c_char, c_void};
-use std::io::Read;
-use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::task::Poll;
+use std::time::Instant;
 
 use anyhow::Result;
-use futures::future::join_all;
-use nginx_sys::ngx_http_request_t;
+use futures::future::{self, join_all};
+use nginx_sys::{ngx_cycle_t, ngx_http_request_t};
 use ngx::core::Status;
 use ngx::ffi::{
     NGX_CONF_TAKE1, NGX_HTTP_LOC_CONF, NGX_HTTP_LOC_CONF_OFFSET, NGX_HTTP_MODULE, NGX_LOG_EMERG,
@@ -15,17 +14,15 @@ use ngx::ffi::{
 use ngx::http::{self, HTTPStatus, HttpModule, MergeConfigError, Request};
 use ngx::http::{HttpModuleLocationConf, HttpModuleMainConf, NgxHttpCoreModule};
 use ngx::{http_request_handler, ngx_conf_log_error, ngx_modules, ngx_string};
-use tokio::io::AsyncReadExt;
 
-use ngx_tickle::finalize_request;
 use ngx_tickle::{Task, spawn};
-use tokio::runtime::Runtime;
+use ngx_tickle::{finalize_request, set_max_runnables_per_wakeup};
 
 struct Module;
 
 impl http::HttpModule for Module {
     fn module() -> &'static ngx_module_t {
-        unsafe { (&raw const sidecar_runtime).as_ref().unwrap() }
+        unsafe { (&raw const yielding).as_ref().unwrap() }
     }
 
     unsafe extern "C" fn postconfiguration(cf: *mut ngx_conf_t) -> ngx_int_t {
@@ -65,19 +62,28 @@ static MODULE_CTX: ngx_http_module_t = ngx_http_module_t {
     merge_loc_conf: Some(Module::merge_loc_conf),
 };
 
+extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
+    // The queue limits the maximum number of runnables run per wakeup to not starve nginx I/O
+    // events. The default of 8 can be changed like this.
+    // Lower values provide more fairness, but incur more overhead.
+    set_max_runnables_per_wakeup(1);
+    Status::NGX_OK.into()
+}
+
 #[used]
 #[allow(non_upper_case_globals)]
-pub static mut sidecar_runtime: ngx_module_t = ngx_module_t {
+pub static mut yielding: ngx_module_t = ngx_module_t {
     ctx: &raw const MODULE_CTX as _,
     commands: unsafe { &COMMANDS[0] as *const _ as *mut _ },
     type_: NGX_HTTP_MODULE as _,
+    init_process: Some(init_process),
     ..ngx_module_t::default()
 };
-ngx_modules!(sidecar_runtime);
+ngx_modules!(yielding);
 
 static mut COMMANDS: [ngx_command_t; 2] = [
     ngx_command_t {
-        name: ngx_string!("sidecar"),
+        name: ngx_string!("yielding"),
         type_: (NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1) as ngx_uint_t,
         set: Some(set_enable),
         conf: NGX_HTTP_LOC_CONF_OFFSET,
@@ -98,7 +104,11 @@ extern "C" fn set_enable(
         let val = match args[1].to_str() {
             Ok(s) => s,
             Err(_) => {
-                ngx_conf_log_error!(NGX_LOG_EMERG, cf, "`sidecar` argument is not utf-8 encoded");
+                ngx_conf_log_error!(
+                    NGX_LOG_EMERG,
+                    cf,
+                    "`yielding` argument is not utf-8 encoded"
+                );
                 return ngx::core::NGX_CONF_ERROR;
             }
         };
@@ -122,70 +132,34 @@ impl http::Merge for ModuleConfig {
     }
 }
 
-async fn non_blocking_io() -> Result<()> {
-    let mut buf = [0u8; 1 << 20];
-    let mut file = tokio::fs::File::open("/dev/zero").await?;
-    file.read_exact(&mut buf).await?;
-    Ok(())
+fn yield_now() -> impl Future<Output = ()> {
+    let mut yielded = false;
+    future::poll_fn(move |cx| {
+        if std::mem::replace(&mut yielded, true) {
+            Poll::Ready(())
+        } else {
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    })
 }
 
-fn blocking_io() -> Result<()> {
-    let mut buf = [0u8; 1 << 20];
-    let mut file = std::fs::File::open("/dev/zero")?;
-    file.read_exact(&mut buf)?;
-    Ok(())
-}
+// A future might choose to yield itself to not block the nginx event loop for too long. In this
+// case, the Scheduler forces a round-trip through the queue and triggers another notify event,
+// even when already on the event-loop thread. This allows for other events to be processed in
+// the meantime.
+async fn yielding_handler(request: &mut Request) -> Result<()> {
+    let start = Instant::now();
 
-fn blocking_fun() {
-    // n.b. std::thread::sleep, not tokio::time:sleep, this blocks the thread!
-    std::thread::sleep(Duration::from_millis(1))
-}
-
-async fn sidecar_handler(request: &mut Request) -> Result<()> {
-    let rt = tokio_runtime();
-    // spawn a task on the sidecar runtime
-    let elapsed = rt
-        .spawn(async move {
-            // do not call nginx functions or refer to nginx-owned data in here, as this future is
-            // not executing on the nginx main thread!
-            let start = Instant::now();
-            tokio::time::sleep(Duration::from_nanos(1)).await;
-            // instead, return the result of the execution to the main future…
-            Instant::now().duration_since(start)
-        })
-        .await
-        .expect("join");
-    // …which can then safely update request.
-    request.add_header_out("x-tokio-sleep", &format!("{elapsed:?}"));
-
-    // Due to the single-threaded design of nginx, it's important to not block the event thread.
-    // This can be achieved…
-    let tasks = vec![
-        // …by using tokio non-blocking io, if available…
-        (rt.spawn(async move {
-            let start = Instant::now();
-            let _ = non_blocking_io().await;
-            ("non_blocking_io", Instant::now().duration_since(start))
-        })),
-        // …wrapping blocking io…
-        (rt.spawn_blocking(|| {
-            let start = Instant::now();
-            let _ = blocking_io();
-            ("blocking_io", Instant::now().duration_since(start))
-        })),
-        // …or any other blocking function in spawn_blocking to move it to an auxillary thread…
-        (rt.spawn_blocking(|| {
-            let start = Instant::now();
-            let _ = blocking_fun();
-            ("blocking_fun", Instant::now().duration_since(start))
-        })),
-    ];
-    // …neither of these will block the event thread, and can't refer to nginx-owned data like
-    // Request, so the results must be returned to the main future and processed here.
-    for result in join_all(tasks).await {
-        let (task_name, duration) = result?;
-        request.add_header_out(&format!("x-{task_name}-time"), &format!("{duration:?}"));
+    let mut tasks = vec![];
+    for _ in 0..100 {
+        tasks.push(spawn(async move {
+            yield_now().await;
+        }));
     }
+    join_all(tasks).await;
+    let elapsed = Instant::now().duration_since(start);
+    request.add_header_out(&format!("x-yielding-time"), &format!("{elapsed:?}"));
 
     finalize_request(request, HTTPStatus::NO_CONTENT.into());
     Ok(())
@@ -208,7 +182,7 @@ http_request_handler!(handler, |request: &mut http::Request| {
         return Status::NGX_ERROR;
     }
     request.set_module_ctx(ctx.cast(), unsafe {
-        (&raw const sidecar_runtime).as_ref().unwrap()
+        (&raw const yielding).as_ref().unwrap()
     });
     let ctx = unsafe { ctx.as_mut() }.unwrap();
 
@@ -217,18 +191,8 @@ http_request_handler!(handler, |request: &mut http::Request| {
     // set task on ctx so it will be aborted on request cancellation via its Drop
     ctx.task = Some(spawn(async move {
         let request = unsafe { Request::from_ngx_http_request(r) };
-        sidecar_handler(request).await.unwrap();
+        yielding_handler(request).await.unwrap();
     }));
 
     Status::NGX_AGAIN
 });
-
-static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-fn tokio_runtime() -> &'static Runtime {
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-    })
-}
