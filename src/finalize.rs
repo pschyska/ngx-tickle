@@ -22,10 +22,9 @@ impl Drop for Finalization {
     }
 }
 
-/// Finalize Request by posting a ngx_event_t. This allows async tasks to finish normally.
-/// SAFETY:
-/// - Must only be run in the event loop thread — i.e. in a nginx handler or from an async task
-///   spawned by this crate.
+/// Enqueue request finalizationvia ngx_event_t. This allows async tasks to finish normally (don't
+/// `.await` after this call). **May only be called from the main thread** — i.e. from an async
+/// task spawned by this crate.
 pub fn finalize_request(request: &mut Request, rc: Status) {
     let request: *mut ngx_http_request_t = request.into();
     unsafe {

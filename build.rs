@@ -1,6 +1,9 @@
 use std::env;
+use std::process::{Command, Stdio};
 
-fn main() {
+use anyhow::bail;
+
+fn main() -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
         // allow unresolved symbols (resolved by nginx at runtime)
@@ -23,4 +26,25 @@ fn main() {
         .file("src/ffi/expand.c")
         .includes(env::split_paths(&include))
         .compile("expand");
+
+    readme()?;
+
+    Ok(())
+}
+
+fn readme() -> anyhow::Result<()> {
+    println!("cargo::rerun-if-env-changed=CARGO_PKG_VERSION");
+    println!("cargo::rerun-if-changed=README.md.tpl");
+    let mut cmd = Command::new("cargo");
+    cmd.arg("xtask");
+    cmd.arg("readme");
+
+    cmd.stdout(Stdio::inherit());
+    cmd.stderr(Stdio::inherit());
+    let rc = cmd.status()?;
+    if !rc.success() {
+        bail!("cargo xtask readme failed with {rc}");
+    }
+
+    Ok(())
 }

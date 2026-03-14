@@ -33,7 +33,7 @@ fn yield_now() -> impl Future<Output = ()> {
 // A future might choose to yield itself to not block the nginx event loop for too long. In this
 // case, the Scheduler forces a round-trip through the queue and triggers another notify event,
 // even when already on the event-loop thread. This allows for other events to be processed in
-// the meantime.
+// the meantime, and prevents unbounded stack growth.
 async fn yielding_handler(request: &mut Request) -> Result<()> {
     let start = Instant::now();
 
@@ -47,6 +47,7 @@ async fn yielding_handler(request: &mut Request) -> Result<()> {
     let elapsed = Instant::now().duration_since(start);
     request.add_header_out(&format!("x-yielding-time"), &format!("{elapsed:?}"));
 
+    // helper to schedule a `ngx_http_finalize_request` call after task finish (don't .await after)
     finalize_request(request, HTTPStatus::NO_CONTENT.into());
     Ok(())
 }
@@ -79,7 +80,7 @@ http_request_handler!(handler, |request: &mut http::Request| {
         return Status::NGX_ERROR;
     }
     request.set_module_ctx(ctx.cast(), unsafe {
-        (&raw const yielding).as_ref().unwrap()
+        (&raw const yielding_example).as_ref().unwrap()
     });
     let ctx = unsafe { ctx.as_mut() }.unwrap();
 
@@ -100,7 +101,7 @@ struct Module;
 
 impl http::HttpModule for Module {
     fn module() -> &'static ngx_module_t {
-        unsafe { (&raw const yielding).as_ref().unwrap() }
+        unsafe { (&raw const yielding_example).as_ref().unwrap() }
     }
 
     unsafe extern "C" fn postconfiguration(cf: *mut ngx_conf_t) -> ngx_int_t {
@@ -142,14 +143,14 @@ static MODULE_CTX: ngx_http_module_t = ngx_http_module_t {
 
 #[used]
 #[allow(non_upper_case_globals)]
-pub static mut yielding: ngx_module_t = ngx_module_t {
+pub static mut yielding_example: ngx_module_t = ngx_module_t {
     ctx: &raw const MODULE_CTX as _,
     commands: unsafe { &COMMANDS[0] as *const _ as *mut _ },
     type_: NGX_HTTP_MODULE as _,
     init_process: Some(init_process),
     ..ngx_module_t::default()
 };
-ngx_modules!(yielding);
+ngx_modules!(yielding_example);
 
 static mut COMMANDS: [ngx_command_t; 2] = [
     ngx_command_t {
