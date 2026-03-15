@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [unreleased]
+
+## [0.2.0]
 
 ### Added
 - selfpipe notify module for non-Linux targets (can be forced with feature `selfpipe`)
@@ -23,5 +25,6 @@
 
 - Initial public release of spawn(), Scheduler and eventfd notify implementation
 
-[unreleased]: https://github.com/olivierlacan/keep-a-changelog/compare/0.1.0...HEAD
+[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/pschyska/ngx-tickle/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/pschyska/ngx-tickle/releases/tag/0.1.0
