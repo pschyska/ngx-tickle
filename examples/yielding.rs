@@ -45,7 +45,7 @@ async fn yielding_handler(request: &mut Request) -> Result<()> {
     }
     join_all(tasks).await;
     let elapsed = Instant::now().duration_since(start);
-    request.add_header_out(&format!("x-yielding-time"), &format!("{elapsed:?}"));
+    request.add_header_out("x-yielding-time", &format!("{elapsed:?}"));
 
     // helper to schedule a `ngx_http_finalize_request` call after task finish (don't .await after)
     finalize_request(request, HTTPStatus::NO_CONTENT.into());

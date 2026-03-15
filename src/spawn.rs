@@ -1,6 +1,8 @@
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 
+/// Handle to a spawned task. See [`async_task::Task`] for details.
+///
 pub use async_task::Task;
 use async_task::{Runnable, ScheduleInfo, WithInfo};
 use crossbeam_channel::{Receiver, Sender, unbounded};

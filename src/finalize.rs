@@ -22,9 +22,18 @@ impl Drop for Finalization {
     }
 }
 
-/// Enqueue request finalizationvia ngx_event_t. This allows async tasks to finish normally (don't
-/// `.await` after this call). **May only be called from the main thread** — i.e. from an async
-/// task spawned by this crate.
+/// Enqueue request finalization
+///
+/// This helper makes it easier to finalize properly from a task.
+/// Calling [`nginx_sys::ngx_http_finalize_request`] directly in a task that is stored in the
+/// request context would trigger immediate cleanup and abort it via the contexts Drop.
+///
+/// If you call finalize_request and **don't .await afterwards**, the task will run to completion
+/// first.
+///
+/// # Thread safety
+///
+/// Must be called from the nginx main thread (i.e. from a task spawned via [`crate::spawn()`]).
 pub fn finalize_request(request: &mut Request, rc: Status) {
     let request: *mut ngx_http_request_t = request.into();
     unsafe {
