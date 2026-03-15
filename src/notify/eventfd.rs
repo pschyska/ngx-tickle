@@ -44,7 +44,6 @@ fn ensure_init() {
 
         ctx.rev.log = log;
         ctx.rev.data = (&raw mut ctx.c).cast();
-        ctx.rev.set_active(1);
         ctx.rev.handler = Some(async_handler);
 
         ctx.wev.log = log;
