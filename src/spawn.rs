@@ -1,6 +1,8 @@
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
 
+/// Handle to a spawned task. See [`async_task::Task`] for details.
+///
 pub use async_task::Task;
 use async_task::{Runnable, ScheduleInfo, WithInfo};
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -21,6 +23,11 @@ pub fn on_main_thread() -> bool {
 
 static MAX_RUNNABLES_PER_WAKEUP: AtomicU32 = AtomicU32::new(8);
 
+/// Set the maximum number of processed runnables per wakeup. Might starve nginx native events if
+/// set too high.
+/// Only applies to off-thread and reentrant wakeups — runnables are run in-place otherwise.
+///
+/// Default: 8
 pub fn set_max_runnables_per_wakeup(value: u32) {
     MAX_RUNNABLES_PER_WAKEUP.store(value, Ordering::Relaxed);
 }
@@ -41,7 +48,7 @@ pub(crate) extern "C" fn async_handler(_ev: *mut ngx_event_t) {
     while let Ok(r) = scheduler.rx.try_recv() {
         r.run();
         cnt += 1;
-        if cnt > limit {
+        if cnt >= limit {
             ngx_log_debug!(
                 ngx_cycle_log().as_ptr(),
                 "tickle: suspend processing after {limit} items"
@@ -67,8 +74,8 @@ impl Scheduler {
 
     fn schedule(&self, runnable: Runnable, info: ScheduleInfo) {
         let main = on_main_thread();
-        // If we are on the event loop thread it's safe to simply run the Runnable, otherwise we
-        // enqueue the Runnable and tickle nginx. The event handler then runs it on the main thread.
+        // If we are on the main thread it's safe to simply run the Runnable, otherwise we enqueue
+        // the Runnable and tickle nginx. The event handler then runs it on the main thread.
         //
         // If woken_while_running, it indicates that a task has yielded itself to the Scheduler.
         // Force round-trip via queue to limit reentrancy.
@@ -93,9 +100,7 @@ fn schedule(runnable: Runnable, info: ScheduleInfo) {
     scheduler.schedule(runnable, info);
 }
 
-/// Creates a new task running on the NGINX event loop.
-/// The Scheduler is thread-safe. In particular, schedule() may be called from any thread.
-/// The Runnables are always .run() on the event loop thread.
+/// Creates a new task running on the nginx event loop.
 pub fn spawn<F, T>(future: F) -> Task<T>
 where
     F: Future<Output = T> + 'static,

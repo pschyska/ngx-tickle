@@ -10,12 +10,14 @@ autobins = false
 
 [dependencies]
 ngx-tickle = { path = ".." }
+ngx = { version = "*", features = ["vendored"]}
 futures = "0.3"
 futures-util = "0.3"
 nginx-sys = "0.5"
-ngx = "0.5"
 tokio = { version="1.49", features = ["rt-multi-thread", "time", "fs", "io-util"] }
 anyhow = "1.0"
+async-compat = "0.2"
+reqwest = "0.13"
 
 [build-dependencies]
 anyhow = "1.0"
@@ -32,4 +34,9 @@ crate-type = ["cdylib"]
 [[example]]
 name = "yielding"
 path = "yielding.rs"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "compat"
+path = "compat.rs"
 crate-type = ["cdylib"]

@@ -74,9 +74,8 @@ pub(crate) fn tickle() {
     let rc = unsafe { write(CTX.write_fd, ptr, core::mem::size_of::<u64>()) };
     if rc < 0 {
         panic!("async: self-pipe write failed: {rc}");
-    } else {
-        ngx_log_debug!(ngx_cycle_log().as_ptr(), "tickle: notified (self-pipe)");
     }
+    ngx_log_debug!(ngx_cycle_log().as_ptr(), "tickle: notified (self-pipe)");
 }
 
 #[allow(dead_code)]

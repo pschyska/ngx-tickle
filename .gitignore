@@ -3,3 +3,5 @@
 .local/
 .envrc.local
 .direnv
+
+CLAUDE.md

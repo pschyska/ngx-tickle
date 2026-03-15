@@ -88,6 +88,7 @@ async fn sidecar_handler(request: &mut Request) -> Result<()> {
         request.add_header_out(&format!("x-{task_name}-time"), &format!("{duration:?}"));
     }
 
+    // helper to schedule a `ngx_http_finalize_request` call after task finish (don't .await after)
     finalize_request(request, HTTPStatus::NO_CONTENT.into());
     Ok(())
 }
@@ -121,7 +122,7 @@ http_request_handler!(handler, |request: &mut http::Request| {
         return Status::NGX_ERROR;
     }
     request.set_module_ctx(ctx.cast(), unsafe {
-        (&raw const sidecar_runtime).as_ref().unwrap()
+        (&raw const sidecar_example).as_ref().unwrap()
     });
     let ctx = unsafe { ctx.as_mut() }.unwrap();
 
@@ -142,7 +143,7 @@ struct Module;
 
 impl http::HttpModule for Module {
     fn module() -> &'static ngx_module_t {
-        unsafe { (&raw const sidecar_runtime).as_ref().unwrap() }
+        unsafe { (&raw const sidecar_example).as_ref().unwrap() }
     }
 
     unsafe extern "C" fn postconfiguration(cf: *mut ngx_conf_t) -> ngx_int_t {
@@ -184,13 +185,13 @@ static MODULE_CTX: ngx_http_module_t = ngx_http_module_t {
 
 #[used]
 #[allow(non_upper_case_globals)]
-pub static mut sidecar_runtime: ngx_module_t = ngx_module_t {
+pub static mut sidecar_example: ngx_module_t = ngx_module_t {
     ctx: &raw const MODULE_CTX as _,
     commands: unsafe { &COMMANDS[0] as *const _ as *mut _ },
     type_: NGX_HTTP_MODULE as _,
     ..ngx_module_t::default()
 };
-ngx_modules!(sidecar_runtime);
+ngx_modules!(sidecar_example);
 
 static mut COMMANDS: [ngx_command_t; 2] = [
     ngx_command_t {

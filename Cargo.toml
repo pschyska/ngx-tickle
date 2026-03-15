@@ -2,6 +2,10 @@
 members = [
     "examples",
 ]
+exclude = ["xtask"]
+
+[package.metadata.docs.rs]
+features = ["docs"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,23 +16,31 @@ repository = "https://github.com/pschyska/ngx-tickle"
 [package]
 name = "ngx-tickle"
 description = "tools for async nginx modules"
+keywords = ["ngx-rust", "nginx", "async" ]
+categories = ["asynchronous", "network-programming", "web-programming"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 autoexamples = false
 
+[features]
+default = []
+selfpipe = []
+docs = ["ngx/vendored"]
+
 [dependencies]
 async-task = "4.7"
 crossbeam-channel = "0.5"
+libc = "0.2"
 nginx-sys = "0.5"
 ngx = "0.5"
-libc = "0.2"
+
+[dev-dependencies]
+ngx = { version="*", features = ["vendored"] }
 
 [build-dependencies]
+anyhow = "1.0"
 cc = "1.2"
-
-[features]
-default = ["vendored"]
-vendored = ["ngx/vendored"]
-selfpipe = []
+serde = { version = "1.0", features = ["derive"] }
+tinytemplate = "1.2"

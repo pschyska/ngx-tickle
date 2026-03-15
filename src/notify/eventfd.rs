@@ -26,7 +26,7 @@ static INIT: OnceLock<()> = OnceLock::new();
 
 fn ensure_init() {
     let _ = INIT.get_or_init(|| {
-        let fd = unsafe { eventfd(0, (O_NONBLOCK | O_CLOEXEC).try_into().unwrap()) };
+        let fd = unsafe { eventfd(0, O_NONBLOCK | O_CLOEXEC) };
 
         if fd == -1 {
             panic!("tickle: eventfd == -1");
@@ -44,7 +44,6 @@ fn ensure_init() {
 
         ctx.rev.log = log;
         ctx.rev.data = (&raw mut ctx.c).cast();
-        ctx.rev.set_active(1);
         ctx.rev.handler = Some(async_handler);
 
         ctx.wev.log = log;
