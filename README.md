@@ -1,5 +1,5 @@
 [![crates.io](https://img.shields.io/crates/v/ngx-tickle)](https://crates.io/crates/ngx-tickle)
-[![docs.rs](https://img.shields.io/docsrs/ngx-tickle/0.1.0)](https://docs.rs/ngx-tickle/0.1.0/ngx_tickle/)
+[![docs.rs](https://img.shields.io/docsrs/ngx-tickle/0.2.0-rc.1)](https://docs.rs/ngx-tickle/0.2.0-rc.1/ngx_tickle/)
 
 # ngx-tickle
 
@@ -49,7 +49,7 @@ does not require `Send`, so they can freely hold references to nginx structures 
 [`ngx::async_::spawn()`]: https://docs.rs/ngx/latest/ngx/async_/fn.spawn.html
 [`async_compat`]: https://docs.rs/async-compat/latest/async_compat/
 [`tokio`]: https://docs.rs/tokio/latest/tokio/
-[`spawn()`]: https://docs.rs/ngx-tickle/0.1.0/ngx_tickle/fn.spawn.html
+[`spawn()`]: https://docs.rs/ngx-tickle/0.2.0-rc.1/ngx_tickle/fn.spawn.html
 [`async_task`]: https://docs.rs/async-task/latest/async_task/
-[`set_max_runnables_per_wakeup()`]: https://docs.rs/ngx-tickle/0.1.0/ngx_tickle/fn.set_max_runnables_per_wakeup.html
+[`set_max_runnables_per_wakeup()`]: https://docs.rs/ngx-tickle/0.2.0-rc.1/ngx_tickle/fn.set_max_runnables_per_wakeup.html
 [`ngx::http::Request`]: https://docs.rs/ngx/latest/ngx/http/struct.Request.html
