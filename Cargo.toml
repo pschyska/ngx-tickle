@@ -36,9 +36,6 @@ libc = "0.2"
 nginx-sys = "0.5"
 ngx = "0.5"
 
-[dev-dependencies]
-ngx = { version="*", features = ["vendored"] }
-
 [build-dependencies]
 anyhow = "1.0"
 cc = "1.2"
