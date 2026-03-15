@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "examples"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-compat",
@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "ngx-tickle"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-task",

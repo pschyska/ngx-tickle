@@ -26,7 +26,7 @@ impl Drop for Finalization {
 ///
 /// This helper makes it easier to finalize properly from a task.
 /// Calling [`nginx_sys::ngx_http_finalize_request`] directly in a task that is stored in the
-/// request context would trigger immediate cleanup and abort it via the contexts Drop.
+/// request context would trigger immediate cleanup and abort it via the context's [`Drop`].
 ///
 /// If you call finalize_request and **don't .await afterwards**, the task will run to completion
 /// first.
