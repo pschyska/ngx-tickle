@@ -1,8 +1,8 @@
 use std::mem;
 
 use nginx_sys::{
-    ngx_delete_posted_event, ngx_event_t, ngx_http_finalize_request, ngx_http_request_t, ngx_int_t,
-    ngx_post_event, ngx_posted_events,
+    ngx_delete_posted_event, ngx_event_t, ngx_http_finalize_request, ngx_http_request_t,
+    ngx_http_run_posted_requests, ngx_int_t, ngx_post_event, ngx_posted_events,
 };
 use ngx::core::{Pool, Status};
 use ngx::http::Request;
@@ -53,6 +53,15 @@ pub fn finalize_request(request: &mut Request, rc: Status) {
 extern "C" fn fini(ev: *mut ngx_event_t) {
     unsafe {
         let fin: *mut Finalization = (*ev).data.cast();
-        ngx_http_finalize_request((*fin).request, (*fin).rc);
+
+        let req = (*fin).request;
+        let rc = (*fin).rc;
+
+        ngx_http_finalize_request(req, rc);
+
+        // Drain anything finalize posted (e.g. ngx_http_terminate_handler, which
+        // destroys the pool). nginx's own event handlers do this on their way out;
+        // our `fini` is a peer they don't know about, so we do it ourselves.
+        ngx_http_run_posted_requests((*req).connection);
     }
 }
