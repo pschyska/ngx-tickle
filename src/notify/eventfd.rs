@@ -6,8 +6,7 @@ use nginx_sys::{NGX_OK, ngx_connection_t, ngx_event_t};
 use ngx::log::ngx_cycle_log;
 use ngx::ngx_log_debug;
 
-use super::ngx_tickle_add_read_event;
-use crate::spawn::async_handler;
+use crate::{notify::ngx_tickle_add_read_event, spawn::async_handler};
 
 struct NotifyContext {
     c: ngx_connection_t,
