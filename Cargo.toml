@@ -15,7 +15,7 @@ repository = "https://github.com/pschyska/ngx-tickle"
 
 [package]
 name = "ngx-tickle"
-description = "tools for async nginx modules"
+description = "Alternative async executor for nginx modules"
 keywords = ["ngx-rust", "nginx", "async" ]
 categories = ["asynchronous", "network-programming", "web-programming"]
 version.workspace = true

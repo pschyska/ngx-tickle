@@ -5,6 +5,27 @@
 
 Thread-safe async executor and event-loop wakeup for nginx modules
 
+## Synopsis
+
+```rust
+use async_compat::CompatExt;
+use ngx_tickle::prelude::*;
+
+async fn async_handler(request: &mut ngx::http::Request) \{
+    let response = reqwest::get("http://example.com").compat().await.unwrap();
+    request.add_header_out("x-example-ran", &format!("\{}", response.status()));
+    finalize_request(request, ngx::http::HTTPStatus::NO_CONTENT.into());
+}
+
+ngx::http_request_handler!(access_phase_handler, |request: &mut ngx::http::Request| \{
+    if request.spawn(async_handler).is_err() \{
+        return ngx::core::Status::NGX_ERROR;
+    }
+
+    ngx::core::Status::NGX_AGAIN
+});
+```
+
 ## When do I need this?
 [`ngx`] provides its own [`ngx::async_::spawn()`] for running async tasks on nginx's
 event loop. This works well for purely single-threaded futures — but as soon as a
@@ -45,6 +66,26 @@ will process our event immediately.
 does not require `Send`, so they can freely hold references to nginx structures like
 [`ngx::http::Request`].
 
+## For ngx-rust users
+
+`ngx::async_::spawn` calls translate one-for-one to [`spawn()`]. The synopsis above
+also shows `request.spawn`, the new request-bound entry point.
+
+## License
+
+ngx-tickle is distributed under the terms of the [MIT license](LICENSE-MIT), or the
+[Apache License (Version 2.0)](LICENSE-APACHE), at your option.
+
+## MSRV
+
+1.85+ (edition 2024)
+
+## Examples
+
+- [`compat.rs`] — “I just want to use reqwest” via async-compat.
+- [`sidecar.rs`] — off-thread work via a sidecar tokio runtime.
+- [`yielding.rs`] — cooperative yielding / fairness demo.
+
 [`ngx`]: https://docs.rs/ngx/latest/ngx/
 [`ngx::async_::spawn()`]: https://docs.rs/ngx/latest/ngx/async_/fn.spawn.html
 [`async_compat`]: https://docs.rs/async-compat/latest/async_compat/
@@ -53,3 +94,6 @@ does not require `Send`, so they can freely hold references to nginx structures 
 [`async_task`]: https://docs.rs/async-task/latest/async_task/
 [`set_max_runnables_per_wakeup()`]: https://docs.rs/ngx-tickle/{ version }/ngx_tickle/fn.set_max_runnables_per_wakeup.html
 [`ngx::http::Request`]: https://docs.rs/ngx/latest/ngx/http/struct.Request.html
+[`compat.rs`]: https://github.com/pschyska/ngx-tickle/blob/main/examples/compat.rs
+[`sidecar.rs`]: https://github.com/pschyska/ngx-tickle/blob/main/examples/sidecar.rs
+[`yielding.rs`]: https://github.com/pschyska/ngx-tickle/blob/main/examples/yielding.rs

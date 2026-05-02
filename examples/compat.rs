@@ -3,8 +3,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use async_compat::Compat;
-use nginx_sys::ngx_http_request_t;
+use async_compat::CompatExt;
+use nginx_sys::{NGX_LOG_ERR, ngx_cycle_t};
 use ngx::core::Status;
 use ngx::ffi::{
     NGX_CONF_TAKE1, NGX_HTTP_LOC_CONF, NGX_HTTP_LOC_CONF_OFFSET, NGX_HTTP_MODULE, NGX_LOG_EMERG,
@@ -13,12 +13,13 @@ use ngx::ffi::{
 };
 use ngx::http::{self, HTTPStatus, HttpModule, MergeConfigError, Request};
 use ngx::http::{HttpModuleLocationConf, HttpModuleMainConf, NgxHttpCoreModule};
-use ngx::{http_request_handler, ngx_conf_log_error, ngx_modules, ngx_string};
+use ngx::{
+    http_request_handler, ngx_conf_log_error, ngx_log_debug, ngx_log_error, ngx_modules, ngx_string,
+};
 use reqwest::Client;
-
-use ngx_tickle::finalize_request;
-use ngx_tickle::{Task, spawn};
 use tokio::runtime::Runtime;
+
+use ngx_tickle::prelude::*;
 
 async fn compat_handler(request: &mut Request) -> Result<()> {
     let start = Instant::now();
@@ -26,17 +27,28 @@ async fn compat_handler(request: &mut Request) -> Result<()> {
     let client = Client::builder().build()?;
 
     let response = client
-        .get("http://example.com")
+        .get("https://example.com")
         // spawn doesn't require Send, and the ngx-tickle executor ensures all tasks are run in the
         // main thread, never concurrently with nginx, so we can freely use Request data here…
         .header("X-orig-method", request.method().as_str())
         .send()
         .await?;
     let elapsed = Instant::now().duration_since(start);
-
     // …and mutate Request.
     request.add_header_out("x-example-status", &format!("{}", response.status()));
     request.add_header_out("x-example-time", &format!("{elapsed:?}"));
+
+    // Request-bound subtask via `spawn_handle` — returns an awaitable handle, the
+    // borrow of `request` is held by the handle until awaited or dropped.
+    request
+        .spawn(async move |request| {
+            let start = Instant::now();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            let elapsed = Instant::now().duration_since(start);
+            request.add_header_out("x-example-subtask-time", &format!("{elapsed:?}"));
+        })
+        .unwrap()
+        .await;
 
     // OPTIONAL: combining "compat" and "sidecar" approaches to move *some* tasks off-thread
 
@@ -59,6 +71,22 @@ async fn compat_handler(request: &mut Request) -> Result<()> {
     Ok(())
 }
 
+// hook to init worker, see also module setup below
+extern "C" fn init_process(cycle: *mut ngx_cycle_t) -> ngx_int_t {
+    // To start a background task, use top-level spawn and `.detach()` the Task, so it keeps
+    // running.
+    // Dropping the Task at the end of this function would abort it otherwise.
+    spawn(
+        async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            ngx_log_debug!(unsafe { (*cycle).log }, "compat-example: Done sleeping");
+        }
+        .compat(),
+    )
+    .detach();
+    Status::NGX_OK.into()
+}
+
 // OPTIONAL: for the "combined" example
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 fn tokio_runtime() -> &'static Runtime {
@@ -77,11 +105,6 @@ async fn heavy_fun() {
 
 // --- http handler ---
 
-#[derive(Default)]
-struct RequestCTX {
-    task: Option<Task<()>>,
-}
-
 http_request_handler!(handler, |request: &mut http::Request| {
     let co = Module::location_conf(request).expect("module config is none");
 
@@ -89,24 +112,13 @@ http_request_handler!(handler, |request: &mut http::Request| {
         return Status::NGX_DECLINED;
     }
 
-    let ctx = request.pool().allocate(RequestCTX::default());
-    if ctx.is_null() {
+    // use RequestSpawn to spawn a Request-bound Task. Compat wraps the *future* returned by
+    // compat_handler so reqwest etc. find a tokio reactor when polled — wrapping the closure
+    // itself would not work since async closures don't implement Future.
+    if let Err(e) = request.spawn(async move |request| compat_handler(request).compat().await) {
+        ngx_log_error!(NGX_LOG_ERR, unsafe { (*request.connection()).log }, "{e}");
         return Status::NGX_ERROR;
     }
-    request.set_module_ctx(ctx.cast(), unsafe {
-        (&raw const compat_example).as_ref().unwrap()
-    });
-    let ctx = unsafe { ctx.as_mut() }.unwrap();
-
-    let r: *mut ngx_http_request_t = request.into();
-
-    let task = spawn(Compat::new(async move {
-        let request = unsafe { Request::from_ngx_http_request(r) };
-        compat_handler(request).await.unwrap();
-    }));
-
-    // set task on ctx so it will be aborted on request cancellation via its Drop
-    ctx.task = Some(task);
 
     Status::NGX_AGAIN
 });
@@ -163,6 +175,7 @@ pub static mut compat_example: ngx_module_t = ngx_module_t {
     ctx: &raw const MODULE_CTX as _,
     commands: unsafe { &COMMANDS[0] as *const _ as *mut _ },
     type_: NGX_HTTP_MODULE as _,
+    init_process: Some(init_process),
     ..ngx_module_t::default()
 };
 ngx_modules!(compat_example);

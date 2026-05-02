@@ -1,5 +1,7 @@
 use std::env;
-use std::fs::{self};
+use std::fs::{self, File};
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -48,15 +50,27 @@ fn readme() -> anyhow::Result<()> {
 
     let new = tt.render(target.to_str().unwrap(), &data)?;
 
-    let current = if target.exists() {
-        Some(fs::read_to_string(target)?)
+    if target.exists() {
+        let current = fs::read_to_string(target)?;
+        if current != new {
+            eprintln!("{} → {}", sauce.display(), target.display());
+            let file = File::open(target)?;
+            let mut perm = file.metadata()?.permissions();
+            perm.set_mode(0o644);
+            file.set_permissions(perm.clone())?;
+            let mut file = File::create(target)?;
+            let mut perm = file.metadata()?.permissions();
+            file.write_all(new.as_bytes())?;
+            perm.set_mode(0o444);
+            file.set_permissions(perm)?;
+        }
     } else {
-        None
+        let mut file = File::create(target)?;
+        let mut permissions = file.metadata()?.permissions();
+        eprintln!("{} → {}", sauce.display(), target.display());
+        file.write_all(new.as_bytes())?;
+        permissions.set_mode(0o444);
     };
 
-    if current.is_none_or(|current| current != new) {
-        fs::write(target, new)?;
-        eprintln!("{} → {}", sauce.display(), target.display());
-    }
     Ok(())
 }
