@@ -2,6 +2,16 @@
 
 ## [unreleased]
 
+## [0.2.1]
+
+### Added
+- `RequestSpawn` trait for request-bound async tasks ([#7](https://github.com/pschyska/ngx-tickle/pull/7))
+- `prelude` module for convenience re-exports
+
+### Fixed
+- missing call to `ngx_http_run_posted_requests` in `finalize_request`,
+  which could leave the request pool un-destroyed after some error paths
+
 ## [0.2.0]
 
 ### Added
@@ -25,6 +35,7 @@
 
 - Initial public release of spawn(), Scheduler and eventfd notify implementation
 
-[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.0...HEAD
+[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/pschyska/ngx-tickle/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/pschyska/ngx-tickle/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/pschyska/ngx-tickle/releases/tag/0.1.0
