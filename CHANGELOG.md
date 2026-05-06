@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+## [0.2.2]
+
 ### Fixed
 - recursive-poll self-deadlock when a future invokes a `Waker` for another task while
   holding a non-reentrant lock (e.g. `std::Mutex` inside hyper's connection pool, via
@@ -41,7 +43,8 @@
 
 - Initial public release of spawn(), Scheduler and eventfd notify implementation
 
-[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.1...HEAD
+[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.2...HEAD
+[0.2.2]: https://github.com/pschyska/ngx-tickle/compare/0.2.1...0.2.2
 [0.2.1]: https://github.com/pschyska/ngx-tickle/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/pschyska/ngx-tickle/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/pschyska/ngx-tickle/releases/tag/0.1.0
