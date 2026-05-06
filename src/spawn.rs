@@ -2,13 +2,13 @@ use std::error::Error;
 use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::task::{Context, Poll};
 
+use async_task::Runnable;
 /// Re-export of [`async_task::Task`]. Returned by [`spawn()`] as the handle for a
 /// top-level task. For request-bound tasks see [`RequestTask`].
 pub use async_task::Task;
-use async_task::Runnable;
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use nginx_sys::ngx_event_t;
 use ngx::http::Request;
@@ -27,7 +27,15 @@ pub fn set_max_runnables_per_wakeup(value: u32) {
     MAX_RUNNABLES_PER_WAKEUP.store(value, Ordering::Relaxed);
 }
 
+// `true` while a tickle is pending in nginx's event queue (we wrote to eventfd, the read event
+// will fire and run `async_handler`). Subsequent schedules can skip the eventfd write — nginx
+// will drain the channel anyway when it processes the pending event.
+static TICKLED: AtomicBool = AtomicBool::new(false);
+
 pub(crate) extern "C" fn async_handler(_ev: *mut ngx_event_t) {
+    // Clear at the start: any schedule that races with the drain will see `false`, tickle again,
+    // and ensure we get a fresh `async_handler` invocation for whatever they queued.
+    TICKLED.store(false, Ordering::Relaxed);
     on_tickled();
     let limit = MAX_RUNNABLES_PER_WAKEUP.load(Ordering::Relaxed);
 
@@ -78,7 +86,15 @@ fn scheduler() -> &'static Scheduler {
 /// `Drop` impls).
 fn schedule(runnable: Runnable) {
     scheduler().tx.send(runnable).expect("send");
-    tickle();
+    // Tickle coalescing: only the thread that flips `false → true` writes to eventfd; subsequent
+    // schedules with TICKLED already `true` skip the syscall — nginx already has a pending event
+    // that will drain the channel.
+    if TICKLED
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+    {
+        tickle();
+    }
 }
 
 /// Spawn a top-level task on the nginx event loop. Returns a [`Task<T>`] handle.
