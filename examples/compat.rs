@@ -38,13 +38,22 @@ async fn compat_handler(request: &mut Request) -> Result<()> {
     request.add_header_out("x-example-status", &format!("{}", response.status()));
     request.add_header_out("x-example-time", &format!("{elapsed:?}"));
 
-    // Request-bound subtask via `spawn_handle` — returns an awaitable handle, the
+    // Request-bound subtask via `request.spawn` — returns an awaitable handle, the
     // borrow of `request` is held by the handle until awaited or dropped.
+    //
+    // Note: the tokio runtime context (thread-locals set by Compat) does NOT propagate
+    // from the parent task to spawned subtasks. Each task that uses tokio APIs must
+    // wrap the relevant future with Compat itself — here, via `.compat().await` on the
+    // async block doing the tokio work.
     request
         .spawn(async move |request| {
-            let start = Instant::now();
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            let elapsed = Instant::now().duration_since(start);
+            let elapsed = async {
+                let start = Instant::now();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Instant::now().duration_since(start)
+            }
+            .compat()
+            .await;
             request.add_header_out("x-example-subtask-time", &format!("{elapsed:?}"));
         })
         .unwrap()
