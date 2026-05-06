@@ -2,6 +2,12 @@
 
 ## [unreleased]
 
+### Fixed
+- recursive-poll self-deadlock when a future invokes a `Waker` for another task while
+  holding a non-reentrant lock (e.g. `std::Mutex` inside hyper's connection pool, via
+  `Pooled<T>::drop`). The scheduler now always queues; runnables are never polled
+  inline as a side effect of another task's wake. Matches tokio's executor behavior.
+
 ## [0.2.1]
 
 ### Added

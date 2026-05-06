@@ -38,13 +38,22 @@ async fn compat_handler(request: &mut Request) -> Result<()> {
     request.add_header_out("x-example-status", &format!("{}", response.status()));
     request.add_header_out("x-example-time", &format!("{elapsed:?}"));
 
-    // Request-bound subtask via `spawn_handle` — returns an awaitable handle, the
+    // Request-bound subtask via `request.spawn` — returns an awaitable handle, the
     // borrow of `request` is held by the handle until awaited or dropped.
+    //
+    // Note: the tokio runtime context (thread-locals set by Compat) does NOT propagate
+    // from the parent task to spawned subtasks. Each task that uses tokio APIs must
+    // wrap the relevant future with Compat itself — here, via `.compat().await` on the
+    // async block doing the tokio work.
     request
         .spawn(async move |request| {
-            let start = Instant::now();
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            let elapsed = Instant::now().duration_since(start);
+            let elapsed = async {
+                let start = Instant::now();
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Instant::now().duration_since(start)
+            }
+            .compat()
+            .await;
             request.add_header_out("x-example-subtask-time", &format!("{elapsed:?}"));
         })
         .unwrap()
@@ -112,9 +121,9 @@ http_request_handler!(handler, |request: &mut http::Request| {
         return Status::NGX_DECLINED;
     }
 
-    // use RequestSpawn to spawn a Request-bound Task. Compat wraps the *future* returned by
-    // compat_handler so reqwest etc. find a tokio reactor when polled — wrapping the closure
-    // itself would not work since async closures don't implement Future.
+    // Use RequestSpawn to spawn a Request-bound Task.
+    // You can use the async closure form to apply .compat() to the inner future, see
+    // [`AsyncFnOnce`](https://doc.rust-lang.org/std/ops/trait.AsyncFnOnce.html).
     if let Err(e) = request.spawn(async move |request| compat_handler(request).compat().await) {
         ngx_log_error!(NGX_LOG_ERR, unsafe { (*request.connection()).log }, "{e}");
         return Status::NGX_ERROR;
