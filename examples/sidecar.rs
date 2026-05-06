@@ -110,7 +110,7 @@ http_request_handler!(handler, |request: &mut http::Request| {
 
     // Use RequestSpawn to spawn a Request-bound Task.
     if let Err(e) = request.spawn(sidecar_handler) {
-        ngx_log_error!(NGX_LOG_ERR, unsafe { (*request.connection()).log }, "{e}");
+        ngx_log_error!(NGX_LOG_ERR, request.log(), "{e}");
         return Status::NGX_ERROR;
     }
 
