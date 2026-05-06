@@ -112,9 +112,9 @@ http_request_handler!(handler, |request: &mut http::Request| {
         return Status::NGX_DECLINED;
     }
 
-    // use RequestSpawn to spawn a Request-bound Task. Compat wraps the *future* returned by
-    // compat_handler so reqwest etc. find a tokio reactor when polled — wrapping the closure
-    // itself would not work since async closures don't implement Future.
+    // Use RequestSpawn to spawn a Request-bound Task.
+    // You can use the async closure form to apply .compat() to the inner future, see
+    // [`AsyncFnOnce`](https://doc.rust-lang.org/std/ops/trait.AsyncFnOnce.html).
     if let Err(e) = request.spawn(async move |request| compat_handler(request).compat().await) {
         ngx_log_error!(NGX_LOG_ERR, unsafe { (*request.connection()).log }, "{e}");
         return Status::NGX_ERROR;
