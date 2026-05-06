@@ -2,6 +2,11 @@
 
 ## [unreleased]
 
+## [0.2.3]
+
+### Fixed
+- close a lost-wakeup window introduced by tickle coalescing
+
 ## [0.2.2]
 
 ### Fixed
@@ -43,7 +48,8 @@
 
 - Initial public release of spawn(), Scheduler and eventfd notify implementation
 
-[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.2...HEAD
+[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.3...HEAD
+[0.2.3]: https://github.com/pschyska/ngx-tickle/compare/0.2.2...0.2.3
 [0.2.2]: https://github.com/pschyska/ngx-tickle/compare/0.2.1...0.2.2
 [0.2.1]: https://github.com/pschyska/ngx-tickle/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/pschyska/ngx-tickle/compare/0.1.0...0.2.0
