@@ -8,10 +8,6 @@
   `Pooled<T>::drop`). The scheduler now always queues; runnables are never polled
   inline as a side effect of another task's wake. Matches tokio's executor behavior.
 
-### Removed
-- public (within-crate) `on_main_thread()` and the `MAIN_TID` static: no longer used
-  by the scheduler and never exported.
-
 ## [0.2.1]
 
 ### Added
