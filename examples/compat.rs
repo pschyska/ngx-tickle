@@ -125,7 +125,7 @@ http_request_handler!(handler, |request: &mut http::Request| {
     // You can use the async closure form to apply .compat() to the inner future, see
     // [`AsyncFnOnce`](https://doc.rust-lang.org/std/ops/trait.AsyncFnOnce.html).
     if let Err(e) = request.spawn(async move |request| compat_handler(request).compat().await) {
-        ngx_log_error!(NGX_LOG_ERR, unsafe { (*request.connection()).log }, "{e}");
+        ngx_log_error!(NGX_LOG_ERR, request.log(), "{e}");
         return Status::NGX_ERROR;
     }
 

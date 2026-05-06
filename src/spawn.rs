@@ -28,15 +28,14 @@ pub fn set_max_runnables_per_wakeup(value: u32) {
 }
 
 // `true` while a tickle is pending in nginx's event queue (we wrote to eventfd, the read event
-// will fire and run `async_handler`). Subsequent schedules can skip the eventfd write — nginx
-// will drain the channel anyway when it processes the pending event.
+// will fire and run `async_handler`).
 static TICKLED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) extern "C" fn async_handler(_ev: *mut ngx_event_t) {
-    // Clear at the start: any schedule that races with the drain will see `false`, tickle again,
-    // and ensure we get a fresh `async_handler` invocation for whatever they queued.
-    TICKLED.store(false, Ordering::Relaxed);
     on_tickled();
+    // order matters: clearing TICKLED before ack'ing the eventfd would open a lost-wakeup window
+    TICKLED.store(false, Ordering::Relaxed);
+
     let limit = MAX_RUNNABLES_PER_WAKEUP.load(Ordering::Relaxed);
 
     let scheduler = scheduler();
