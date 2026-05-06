@@ -29,10 +29,10 @@ fn yield_now() -> impl Future<Output = ()> {
     })
 }
 
-// A future might choose to yield itself to not block the nginx event loop for too long. In this
-// case, the Scheduler forces a round-trip through the queue and triggers another notify event,
-// even when already on the event-loop thread. This allows for other events to be processed in
-// the meantime, and prevents unbounded stack growth.
+// A future might choose to yield itself to not block the nginx event loop for too long. The
+// Scheduler drains the wakeup queue in bounded batches (configurable via
+// `set_max_runnables_per_wakeup`), so nginx's own I/O events don't starve even when async tasks
+// produce wakeups in quick succession.
 async fn yielding_handler(request: &mut Request) -> Result<()> {
     let start = Instant::now();
 

@@ -63,13 +63,14 @@
 //!
 //! If unsure, start with [`async_compat`].
 //!
-//! # Reentrancy
+//! # Fairness
 //!
-//! If a task is woken while running ([`async_task::ScheduleInfo::woken_while_running`]),
-//! usually because it yielded itself to the scheduler, it is forced through the queue.
-//! This is to prevent unbounded stack growth.
+//! Runnables are drained from the wakeup queue in bounded batches (default 8,
+//! configurable via [`set_max_runnables_per_wakeup`]). This ensures nginx's own
+//! I/O events don't starve when async tasks produce wakeups in quick succession.
 //!
 //! See the [`yielding` example](https://github.com/pschyska/ngx-tickle/blob/main/examples/yielding.rs)
+//! for a demonstration.
 //!
 //! # Feature flags
 //!

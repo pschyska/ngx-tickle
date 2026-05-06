@@ -2,35 +2,25 @@ use std::error::Error;
 use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::task::{Context, Poll};
 
 /// Re-export of [`async_task::Task`]. Returned by [`spawn()`] as the handle for a
 /// top-level task. For request-bound tasks see [`RequestTask`].
 pub use async_task::Task;
-use async_task::{Runnable, ScheduleInfo, WithInfo};
+use async_task::Runnable;
 use crossbeam_channel::{Receiver, Sender, unbounded};
-use nginx_sys::{ngx_event_t, ngx_thread_tid};
+use nginx_sys::ngx_event_t;
 use ngx::http::Request;
 use ngx::log::ngx_cycle_log;
 use ngx::ngx_log_debug;
 
 use crate::notify::*;
 
-static MAIN_TID: AtomicI64 = AtomicI64::new(-1);
-
-#[inline]
-pub fn on_main_thread() -> bool {
-    let main_tid = MAIN_TID.load(Ordering::Relaxed);
-    let tid: i64 = unsafe { ngx_thread_tid().into() };
-    main_tid == tid
-}
-
 static MAX_RUNNABLES_PER_WAKEUP: AtomicU32 = AtomicU32::new(8);
 
-/// Set the maximum number of processed runnables per wakeup. Might starve nginx native events if
-/// set too high.
-/// Only applies to off-thread and reentrant wakeups — runnables are run in-place otherwise.
+/// Set the maximum number of runnables processed per wakeup. Higher values reduce
+/// scheduling overhead at the cost of fairness with nginx's own I/O events.
 ///
 /// Default: 8
 pub fn set_max_runnables_per_wakeup(value: u32) {
@@ -39,9 +29,6 @@ pub fn set_max_runnables_per_wakeup(value: u32) {
 
 pub(crate) extern "C" fn async_handler(_ev: *mut ngx_event_t) {
     on_tickled();
-    // initialize MAIN_TID on first execution
-    let tid = unsafe { ngx_thread_tid().into() };
-    let _ = MAIN_TID.compare_exchange(-1, tid, Ordering::Relaxed, Ordering::Relaxed);
     let limit = MAX_RUNNABLES_PER_WAKEUP.load(Ordering::Relaxed);
 
     let scheduler = scheduler();
@@ -76,22 +63,6 @@ impl Scheduler {
         let (tx, rx) = unbounded();
         Scheduler { tx, rx }
     }
-
-    fn schedule(&self, runnable: Runnable, info: ScheduleInfo) {
-        let main = on_main_thread();
-        // If we are on the main thread it's safe to simply run the Runnable, otherwise we enqueue
-        // the Runnable and tickle nginx. The event handler then runs it on the main thread.
-        //
-        // If woken_while_running, it indicates that a task has yielded itself to the Scheduler.
-        // Force round-trip via queue to limit reentrancy.
-        if main && !info.woken_while_running {
-            runnable.run();
-        } else {
-            self.tx.send(runnable).expect("send");
-
-            tickle();
-        }
-    }
 }
 
 static SCHEDULER: OnceLock<Scheduler> = OnceLock::new();
@@ -100,9 +71,14 @@ fn scheduler() -> &'static Scheduler {
     SCHEDULER.get_or_init(Scheduler::new)
 }
 
-fn schedule(runnable: Runnable, info: ScheduleInfo) {
-    let scheduler = scheduler();
-    scheduler.schedule(runnable, info);
+/// Always queue + tickle. Wakes never poll a task inline; runnables are drained from
+/// the queue by `async_handler` on the nginx main thread. This avoids re-entrancy
+/// hazards (e.g. a `Waker::wake()` invoked from inside another task's poll, while a
+/// non-reentrant lock like `std::Mutex` is held — a common pattern in connection-pool
+/// `Drop` impls).
+fn schedule(runnable: Runnable) {
+    scheduler().tx.send(runnable).expect("send");
+    tickle();
 }
 
 /// Spawn a top-level task on the nginx event loop. Returns a [`Task<T>`] handle.
@@ -117,7 +93,7 @@ where
     T: 'static,
 {
     ngx_log_debug!(ngx_cycle_log().as_ptr(), "tickle: spawning new task");
-    let (runnable, task) = unsafe { async_task::spawn_unchecked(future, WithInfo(schedule)) };
+    let (runnable, task) = unsafe { async_task::spawn_unchecked(future, schedule) };
     runnable.schedule();
     task
 }
@@ -194,7 +170,7 @@ impl RequestSpawn for Request {
         );
         let pool = self.pool();
         let fut = f(self);
-        let (runnable, task) = unsafe { async_task::spawn_unchecked(fut, WithInfo(schedule)) };
+        let (runnable, task) = unsafe { async_task::spawn_unchecked(fut, schedule) };
         // Anchor the Task in the request pool: pool cleanup runs `drop_in_place`
         // on `ngx_destroy_pool`, dropping the task and cancelling the runnable.
         let slot = pool.allocate(RequestTask { task: Some(task) });
