@@ -66,6 +66,21 @@ will process our event immediately.
 does not require `Send`, so they can freely hold references to nginx structures like
 [`ngx::http::Request`].
 
+## Performance
+
+Per-task overhead is small enough to disappear in nginx's own request pipeline.
+In a preliminary benchmarking series on a 5850U running a single nginx worker, driven
+by `wrk2 -t4 -c100 -d30s -R15000 --latency http://127.0.0.1…` on the same machine:
+
+- ~30µs per request-bound task (spawn + first poll + finalize_request round-trip)
+- ~10µs per nested subtask round-trip
+- reported p50 request latency is ~770µs whether the handler is a bare `return 204;` in
+  nginx.conf or a spawned ngx-tickle task — the integration cost seems to be below
+  `wrk2`'s run-to-run noise floor at the request level
+- the executor itself only takes a small percentage of CPU time; adding further
+  infrastructure (`async-compat`) or `spawn_blocking` callers (`tokio::fs`) predictably
+  increases overhead
+
 ## For ngx-rust users
 
 `ngx::async_::spawn` calls translate one-for-one to [`spawn()`]. The synopsis above

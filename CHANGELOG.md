@@ -2,6 +2,10 @@
 
 ## [unreleased]
 
+### Fixed
+- use-after-free in `finalize_request`: capture `request->connection` before
+  `ngx_http_finalize_request`
+
 ## [0.2.3]
 
 ### Fixed

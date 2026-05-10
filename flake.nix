@@ -36,6 +36,27 @@
         let
           pkgs = channels.nixpkgs;
           toolchain = pkgs.rust-bin.stable.latest.default;
+
+          ff = pkgs.writeShellApplication {
+            name = "ff";
+
+            runtimeInputs = with pkgs; [
+              toolchain
+              gnugrep
+              findutils
+            ];
+            text = ''
+              (
+                cd "$PRJ_ROOT"
+                printf "# cargo fix\n"
+                cargo fix --workspace --all-targets --allow-dirty
+                printf "\n# cargo clippy --fix\n"
+                cargo clippy --workspace --all-targets --fix --allow-dirty
+                printf "\n# rustfmt\n"
+                git ls-files | grep '\.rs$' | xargs -r rustfmt --edition 2024
+              )
+            '';
+          };
         in
         with pkgs;
         {
@@ -64,7 +85,7 @@
               }
             ];
             language.rust.enableDefaultToolchain = false;
-            packages = [ toolchain ];
+            packages = [ toolchain ff ];
           };
         };
     };
