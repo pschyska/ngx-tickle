@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+## [0.2.4]
+
 ### Fixed
 - use-after-free in `finalize_request`: capture `request->connection` before
   `ngx_http_finalize_request`
@@ -52,7 +54,8 @@
 
 - Initial public release of spawn(), Scheduler and eventfd notify implementation
 
-[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.3...HEAD
+[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.4...HEAD
+[0.2.4]: https://github.com/pschyska/ngx-tickle/compare/0.2.3...0.2.4
 [0.2.3]: https://github.com/pschyska/ngx-tickle/compare/0.2.2...0.2.3
 [0.2.2]: https://github.com/pschyska/ngx-tickle/compare/0.2.1...0.2.2
 [0.2.1]: https://github.com/pschyska/ngx-tickle/compare/0.2.0...0.2.1
