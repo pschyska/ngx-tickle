@@ -53,7 +53,7 @@
                 printf "\n# cargo clippy --fix\n"
                 cargo clippy --workspace --all-targets --fix --allow-dirty
                 printf "\n# rustfmt\n"
-                git ls-files | grep '\.rs$' | xargs rustfmt --edition 2024
+                git ls-files | grep '\.rs$' | xargs -r rustfmt --edition 2024
               )
             '';
           };

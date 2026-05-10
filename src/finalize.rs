@@ -59,12 +59,16 @@ extern "C" fn fini(ev: *mut ngx_event_t) {
 
         let req = (*fin).request;
         let rc = (*fin).rc;
+        // *req may be freed by ngx_http_finalize_request (e.g. via ngx_http_terminate_handler);
+        // capture c first. The connection itself is recycled, not freed, and
+        // ngx_http_run_posted_requests bails on c->destroyed.
+        let c = (*req).connection;
 
         ngx_http_finalize_request(req, rc);
 
         // Drain anything finalize posted (e.g. ngx_http_terminate_handler, which
         // destroys the pool). nginx's own event handlers do this on their way out;
         // our `fini` is a peer they don't know about, so we do it ourselves.
-        ngx_http_run_posted_requests((*req).connection);
+        ngx_http_run_posted_requests(c);
     }
 }
