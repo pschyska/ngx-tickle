@@ -31,7 +31,7 @@ fn yield_now() -> impl Future<Output = ()> {
 
 // A future might choose to yield itself to not block the nginx event loop for too long. The
 // Scheduler drains the wakeup queue in bounded batches (configurable via
-// `set_max_runnables_per_wakeup`), so nginx's own I/O events don't starve even when async tasks
+// `set_batch_size`), so nginx's own I/O events don't starve even when async tasks
 // produce wakeups in quick succession.
 async fn yielding_handler(request: &mut Request) -> Result<()> {
     let start = Instant::now();
@@ -53,10 +53,19 @@ async fn yielding_handler(request: &mut Request) -> Result<()> {
 
 // used in ngx_module_t definition below
 extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
+    let process = unsafe { nginx_sys::ngx_process } as u32;
+    // don't run for master process
+    if !matches!(
+        process,
+        nginx_sys::NGX_PROCESS_SINGLE | nginx_sys::NGX_PROCESS_WORKER
+    ) {
+        return Status::NGX_OK.into();
+    }
+
     // The queue limits the maximum number of runnables run per wakeup to not starve nginx I/O
     // events. The default of 8 can be changed like this.
     // Lower values provide more fairness, but incur more overhead.
-    set_max_runnables_per_wakeup(1);
+    set_batch_size(1);
     Status::NGX_OK.into()
 }
 

@@ -17,14 +17,20 @@ use ngx::ngx_log_debug;
 
 use crate::notify::*;
 
-static MAX_RUNNABLES_PER_WAKEUP: AtomicU32 = AtomicU32::new(8);
+static BATCH_SIZE: AtomicU32 = AtomicU32::new(8);
 
 /// Set the maximum number of runnables processed per wakeup. Higher values reduce
 /// scheduling overhead at the cost of fairness with nginx's own I/O events.
 ///
+/// Under saturation, the non-coalesced eventfd-write rate is at least `1/batch_size`
+/// — one forced write per limit-hit drain. Below saturation, the rate is determined
+/// by the workload's natural burst depth.
+///
+/// See also: [Fairness](`crate#fairness`)
+///
 /// Default: 8
-pub fn set_max_runnables_per_wakeup(value: u32) {
-    MAX_RUNNABLES_PER_WAKEUP.store(value, Ordering::Relaxed);
+pub fn set_batch_size(value: u32) {
+    BATCH_SIZE.store(value, Ordering::Relaxed);
 }
 
 // `true` while a tickle is pending in nginx's event queue (we wrote to eventfd, the read event
@@ -36,7 +42,7 @@ pub(crate) extern "C" fn async_handler(_ev: *mut ngx_event_t) {
     // order matters: clearing TICKLED before ack'ing the eventfd would open a lost-wakeup window
     TICKLED.store(false, Ordering::Relaxed);
 
-    let limit = MAX_RUNNABLES_PER_WAKEUP.load(Ordering::Relaxed);
+    let limit = BATCH_SIZE.load(Ordering::Relaxed);
 
     let scheduler = scheduler();
 

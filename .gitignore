@@ -5,3 +5,5 @@
 .direnv
 
 CLAUDE.md
+
+benchmark_data/

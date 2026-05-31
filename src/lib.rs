@@ -66,8 +66,12 @@
 //! # Fairness
 //!
 //! Runnables are drained from the wakeup queue in bounded batches (default 8,
-//! configurable via [`set_max_runnables_per_wakeup`]). This ensures nginx's own
-//! I/O events don't starve when async tasks produce wakeups in quick succession.
+//! configurable via [`set_batch_size`]). This ensures nginx's own
+//! I/O events don't starve when async tasks produce wakeups in quick succession, but sets an upper
+//! limit for the amount of "tickle coalescing" that can be done.
+//!
+//! Tickle coalescing avoids an eventfd/self-pipe write when notifying nginx is not necessary, and
+//! keeps the scheduling syscall-free.
 //!
 //! See the [`yielding` example](https://github.com/pschyska/ngx-tickle/blob/main/examples/yielding.rs)
 //! for a demonstration.
@@ -89,5 +93,5 @@ mod finalize;
 pub use finalize::finalize_request;
 mod notify;
 mod spawn;
-pub use spawn::{RequestSpawn, RequestTask, Task, set_max_runnables_per_wakeup, spawn};
+pub use spawn::{RequestSpawn, RequestTask, Task, set_batch_size, spawn};
 pub mod prelude;

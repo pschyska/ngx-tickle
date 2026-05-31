@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
 
 fn readme() -> anyhow::Result<()> {
     println!("cargo::rerun-if-env-changed=CARGO_PKG_VERSION");
-    println!("cargo::rerun-if-changed=README.md.tpl");
+    println!("cargo::rerun-if-changed=README.tpl.md");
 
     // xtask is not included in the published crate tarball
     if !std::path::Path::new("xtask/Cargo.toml").exists() {

@@ -62,6 +62,12 @@ fn main() -> Result<()> {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-undefined,dynamic_lookup");
     }
 
+    println!("cargo::rerun-if-env-changed=DEP_NGINX_FEATURES_CHECK");
+    println!(
+        "cargo::rustc-check-cfg=cfg(ngx_feature, values({}))",
+        std::env::var("DEP_NGINX_FEATURES_CHECK").unwrap_or("any()".to_string())
+    );
+
     make_install()?;
 
     Ok(())

@@ -4,3 +4,7 @@
 !/conf
 /conf/*
 !/conf/nginx.conf
+!/conf/benchmark.conf
+!/html
+/html/*
+!/html/example.json

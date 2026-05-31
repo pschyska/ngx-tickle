@@ -4,7 +4,7 @@
 //! use ngx_tickle::prelude::*;
 //! ```
 #[doc(no_inline)]
-pub use crate::{RequestTask, Task, finalize_request, set_max_runnables_per_wakeup, spawn};
+pub use crate::{RequestTask, Task, finalize_request, set_batch_size, spawn};
 
 #[doc(no_inline)]
 pub use crate::RequestSpawn as _;

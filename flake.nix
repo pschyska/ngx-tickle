@@ -85,7 +85,19 @@
               }
             ];
             language.rust.enableDefaultToolchain = false;
-            packages = [ toolchain ff ];
+            packages = [
+              toolchain
+              gnumake
+              ff
+
+              gdb
+              # benchmarks
+              heaptrack
+              perf
+              wrk
+              wrk2
+              xan
+            ];
           };
         };
     };
