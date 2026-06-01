@@ -1,0 +1,13 @@
+project:
+  type: default
+  render:
+  - benchmark_report.qmd
+
+format: gfm
+
+execute:
+  echo: false
+  warning: false
+  freeze: auto
+
+df-print: default

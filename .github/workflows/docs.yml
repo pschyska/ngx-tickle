@@ -53,3 +53,9 @@ jobs:
         run: |
           cargo doc --features ngx/vendored --workspace
         shell: *shell
+      - name: Check benchmark_report.md
+        run: |
+          git lfs pull
+          quarto render misc/quarto/benchmark_report.qmd
+          git diff --exit-code misc/quarto/benchmark_report.md
+        shell: &shell "nix develop --impure -c bash -e {0}"

@@ -209,7 +209,7 @@ stamp="$(date -Iseconds)"
 
 out_file="$out_dir"/"$stamp".csv
 xan cat rows "$temp"/*.csv | xan sort -s name,mode,batch_size,rep -o "$out_file"
-xan view "$out_file"
+xan view --all --cols 999 "$out_file"
 
 xan sort -s name,batch_size "$temp/heaptrack/heaptrack.csv" -o "$out_dir"/"$stamp"_heaptrack.csv
-xan view "$out_dir"/"$stamp"_heaptrack.csv
+xan view --all --cols 999 "$out_dir"/"$stamp"_heaptrack.csv

@@ -28,7 +28,7 @@
 //!
 //! ## async-compat
 //!
-//! [`async_compat`] transparently provides [`tokio`] and [`futures`] contexts, letting
+//! [`async-compat`] transparently provides [`tokio`] and [`futures`] contexts, letting
 //! you use crates that expect either directly. Note that it provides these *runtimes*,
 //! without using their *executors*. All futures are still polled on the ngx-tickle
 //! executor, on the nginx main thread.
@@ -36,7 +36,7 @@
 //! ### Advantages
 //!
 //! - easier to use; just wrap your future via `Compat::new(fut)` or `fut.compat()`
-//!   (both from [`async_compat`]).
+//!   (both from [`async-compat`]).
 //!
 //! ### Disadvantages
 //!
@@ -61,7 +61,7 @@
 //! Both approaches (and a combination of the two) are demonstrated in the [`compat`
 //! example]. The sidecar pattern alone is shown in the [`sidecar` example].
 //!
-//! If unsure, start with [`async_compat`].
+//! If unsure, start with [`async-compat`].
 //!
 //! # Fairness
 //!

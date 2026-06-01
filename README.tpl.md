@@ -38,7 +38,7 @@ secondary thread is involved, things get tricky:
   happens. This causes requests to hang unpredictably.
 
 Secondary threads appear whenever you integrate another runtime — whether through
-[`async_compat`] or a dedicated “sidecar”-runtime like [`tokio`].
+[`async-compat`] or a dedicated “sidecar”-runtime like [`tokio`].
 
 ngx-tickle provides a drop-in replacement [`spawn()`] that handles all of this
 correctly: It allows wakeups from any thread, but ensures futures always run on the main
@@ -66,17 +66,13 @@ does not require `Send`, so they can freely hold references to nginx structures 
 ## Performance
 
 Per-task overhead is small enough to disappear in nginx's own request pipeline.
-In a preliminary benchmarking series on a 5850U running a single nginx worker, driven
-by `wrk2 -t4 -c100 -d30s -R15000 --latency http://127.0.0.1…` on the same machine:
 
-- ~30µs per request-bound task (spawn + first poll + finalize_request round-trip)
-- ~10µs per nested subtask round-trip
-- reported p50 request latency is ~770µs whether the handler is a bare `return 204;` in
-  nginx.conf or a spawned ngx-tickle task — the integration cost seems to be below
-  `wrk2`'s run-to-run noise floor at the request level
-- the executor itself only takes a small percentage of CPU time; adding further
-  infrastructure (`async-compat`) or `spawn_blocking` callers (`tokio::fs`) predictably
-  increases overhead
+ngx-tickle’s scheduler matches ngx-rust’s within a few percent, adds no measurable heap, and
+keeps latencies tight.
+
+Refer to the [benchmark report](misc/quarto/benchmark_report.md)
+for data comparing the schedulers, nginx native I/O futures vs [`tokio`], and exploring
+the impact of `batch_size` tuning.
 
 ## For ngx-rust users
 
@@ -100,7 +96,7 @@ ngx-tickle is distributed under the terms of the [MIT license](LICENSE-MIT), or 
 
 [`ngx`]: https://docs.rs/ngx/latest/ngx/
 [`ngx::async_::spawn()`]: https://docs.rs/ngx/latest/ngx/async_/fn.spawn.html
-[`async_compat`]: https://docs.rs/async-compat/latest/async_compat/
+[`async-compat`]: https://docs.rs/async-compat/latest/async_compat/
 [`tokio`]: https://docs.rs/tokio/latest/tokio/
 [`spawn()`]: https://docs.rs/ngx-tickle/{ version }/ngx_tickle/fn.spawn.html
 [`async_task`]: https://docs.rs/async-task/latest/async_task/
