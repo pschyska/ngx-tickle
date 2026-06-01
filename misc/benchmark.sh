@@ -131,14 +131,14 @@ run_group() {
 			printf "name must start with %s_, got %s\n" "$prefix" "$name" >&2
 			exit 1
 		fi
-		start_nginx "$batch_size" ""
 		for rep in $(seq 3); do
+			start_nginx "$batch_size" ""
 			printf "\n### wrk %s,%d ###\n\n" "$name""${batch_size_display:+" (batch_size=$batch_size_display)"}" "$rep"
 			report="$temp/$name.wrk${batch_size_display:+".$batch_size_display"}.$rep.csv"
 			extra="name=$name,mode=wrk,batch_size=$batch_size_display,rep=$rep,r="
 			wrk "$report" "$extra" "$uri"
+			stop_nginx
 		done
-		stop_nginx
 	done <<<"$group"
 
 	r=$(pace "$temp/$prefix"_*.csv)
@@ -146,14 +146,14 @@ run_group() {
 	printf "\n\n### Pace for %s group: %d ###\n\n" "$prefix" "$r"
 
 	while read -r name uri batch_size batch_size_display; do
-		start_nginx "$batch_size" ""
 		for rep in $(seq 3); do
+			start_nginx "$batch_size" ""
 			printf "\n### wrk2 %s,%d ###\n\n" "$name""${batch_size_display:+" (batch_size=$batch_size_display)"}" "$rep"
 			report="$temp/$name.wrk2${batch_size_display:+".$batch_size_display"}.$rep.csv"
 			extra="name=$name,mode=wrk2,batch_size=$batch_size_display,rep=$rep,r=$r"
 			wrk2 "$report" "$extra" "$r" "$uri"
+			stop_nginx
 		done
-		stop_nginx
 	done <<<"$group"
 
 	heaptrack_out="$temp/heaptrack/heaptrack"

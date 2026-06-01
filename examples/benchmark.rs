@@ -6,7 +6,7 @@ use std::ptr::NonNull;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::{env, io, mem, ptr};
 
 use anyhow::{Result, bail};
@@ -60,17 +60,11 @@ fn pool_str(pool: &Pool, s: &str) -> ngx_str_t {
     }
 }
 
-// We cirumvent the resolver cache by resolving unique names in a local unbound redirect zone
+// Unique names (resolved via a local unbound redirect zone) so every request is a real
+// cache-miss query — actual per-request I/O. The cache is kept bounded by setting the
+// resolver's eviction grace to 0 in `get_ngx_resolver` (nginx then reclaims each node as
+// soon as its lookup completes), so no reset ticker is needed.
 static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-// To prevent too much growth of the resolver cache in nginx, we set valid=1s and reset the counter
-// every second.
-async fn reset_counter() {
-    loop {
-        ngx::async_::sleep(Duration::from_secs(1)).await;
-        COUNTER.store(0, Ordering::Relaxed);
-    }
-}
 
 fn get_random_name() -> String {
     let i = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -79,7 +73,14 @@ fn get_random_name() -> String {
 
 fn get_ngx_resolver(request: &mut Request) -> Resolver {
     let clcf = NgxHttpCoreModule::location_conf(request).expect("http core loc conf");
-    Resolver::from_resolver(NonNull::new(clcf.resolver).expect("resolver"), 1000)
+    let resolver = NonNull::new(clcf.resolver).expect("resolver");
+    // Bound the resolver cache without a reset ticker: set the eviction grace to 0 so
+    // nginx's own ngx_resolver_expire() (which runs on every resolve) reclaims each
+    // cached node as soon as its lookup completes and has no waiters. Idempotent — we
+    // just overwrite 0 each call. SAFETY: clcf.resolver is a valid, live ngx_resolver_t
+    // for the worker's lifetime; `expire` is a plain time_t field.
+    unsafe { (*resolver.as_ptr()).expire = 0 };
+    Resolver::from_resolver(resolver, 1000)
 }
 
 async fn resolve(request: &mut Request, start: Instant) -> Result<Status> {
@@ -420,8 +421,6 @@ extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
             .parse()
             .unwrap_or_else(|e| panic!("invalid TICKLE_BATCH_SIZE: {e}")),
     );
-
-    spawn(async move { reset_counter().await }).detach();
 
     Status::NGX_OK.into()
 }
