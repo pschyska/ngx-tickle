@@ -15,7 +15,11 @@ use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use hyper_util::rt::TokioIo;
 use hyper_util::rt::tokio::WithTokioIo;
-use nginx_sys::{AF_INET, ngx_addr_t, ngx_cycle_t, ngx_http_request_t, sockaddr_in};
+use nginx_sys::{
+    AF_INET, ngx_addr_t, ngx_cycle_t, ngx_http_finalize_request, ngx_http_request_t,
+    ngx_http_run_posted_requests, ngx_resolve_name, ngx_resolve_name_done, ngx_resolve_start,
+    ngx_resolver_ctx_t, ngx_resolver_t, sockaddr_in,
+};
 use ngx::async_::resolver::Resolver;
 use ngx::core::{Pool, Status};
 use ngx::ffi::{
@@ -60,26 +64,29 @@ fn pool_str(pool: &Pool, s: &str) -> ngx_str_t {
     }
 }
 
-// Unique names (resolved via a local unbound redirect zone) so every request is a real
-// cache-miss query — actual per-request I/O. The cache is kept bounded by setting the
-// resolver's eviction grace to 0 in `get_ngx_resolver` (nginx then reclaims each node as
-// soon as its lookup completes), so no reset ticker is needed.
+// Unique names (resolved via a local unbound redirect zone) so requests do real DNS
+// I/O instead of hitting nginx's resolver cache. The counter wraps to bound the
+// resolver cache cardinality; with valid=1s it should be comfortably larger than max.
+// observed rps, so name[0] will be expired when wrapping.
+const RESOLVE_NAME_RING_SIZE: u64 = 100_000;
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn get_random_name() -> String {
-    let i = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let i = COUNTER
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |i| {
+            Some((i + 1) % RESOLVE_NAME_RING_SIZE)
+        })
+        .unwrap_or_else(|i| i);
     format!("b{i:x}.fake.internal.")
 }
 
-fn get_ngx_resolver(request: &mut Request) -> Resolver {
+fn get_ngx_resolver_ptr(request: &mut Request) -> NonNull<ngx_resolver_t> {
     let clcf = NgxHttpCoreModule::location_conf(request).expect("http core loc conf");
-    let resolver = NonNull::new(clcf.resolver).expect("resolver");
-    // Bound the resolver cache without a reset ticker: set the eviction grace to 0 so
-    // nginx's own ngx_resolver_expire() (which runs on every resolve) reclaims each
-    // cached node as soon as its lookup completes and has no waiters. Idempotent — we
-    // just overwrite 0 each call. SAFETY: clcf.resolver is a valid, live ngx_resolver_t
-    // for the worker's lifetime; `expire` is a plain time_t field.
-    unsafe { (*resolver.as_ptr()).expire = 0 };
+    NonNull::new(clcf.resolver).expect("resolver")
+}
+
+fn get_ngx_resolver(request: &mut Request) -> Resolver {
+    let resolver = get_ngx_resolver_ptr(request);
     Resolver::from_resolver(resolver, 1000)
 }
 
@@ -96,6 +103,111 @@ async fn resolve(request: &mut Request, start: Instant) -> Result<Status> {
         &format!("{}", Instant::now().duration_since(start).as_secs_f32()),
     );
     Ok(HTTPStatus::NO_CONTENT.into())
+}
+
+struct SyncResolve {
+    request: *mut ngx_http_request_t,
+    start: Instant,
+    ctx: *mut ngx_resolver_ctx_t,
+}
+
+impl Drop for SyncResolve {
+    fn drop(&mut self) {
+        if !self.ctx.is_null() {
+            unsafe { ngx_resolve_name_done(self.ctx) };
+            self.ctx = ptr::null_mut();
+        }
+    }
+}
+
+fn resolve_sync(request: &mut Request, start: Instant) -> Status {
+    let name = get_random_name();
+    let pool = request.pool();
+    let name = pool_str(&pool, &name);
+    let resolver = get_ngx_resolver_ptr(request);
+
+    let ctx = unsafe { ngx_resolve_start(resolver.as_ptr(), ptr::null_mut()) };
+    if ctx.is_null() {
+        ngx_log_error!(
+            NGX_LOG_ERR,
+            request.log(),
+            "resolver context allocation failed"
+        );
+        return HTTPStatus::INTERNAL_SERVER_ERROR.into();
+    }
+
+    let state = pool.allocate(SyncResolve {
+        request: request.into(),
+        start,
+        ctx,
+    });
+    if state.is_null() {
+        unsafe { ngx_resolve_name_done(ctx) };
+        ngx_log_error!(
+            NGX_LOG_ERR,
+            request.log(),
+            "sync resolver state allocation failed"
+        );
+        return HTTPStatus::INTERNAL_SERVER_ERROR.into();
+    }
+
+    unsafe {
+        (*ctx).name = name;
+        (*ctx).timeout = 1000;
+        (*ctx).set_cancelable(1);
+        (*ctx).handler = Some(resolve_sync_done);
+        (*ctx).data = state.cast::<c_void>();
+    }
+
+    let rc = unsafe { ngx_resolve_name(ctx) };
+    if Status(rc).is_ok() {
+        Status::NGX_AGAIN
+    } else {
+        unsafe {
+            // ngx_resolve_name frees the context on failure.
+            (*state).ctx = ptr::null_mut();
+        }
+        ngx_log_error!(NGX_LOG_ERR, request.log(), "sync resolver start failed");
+        HTTPStatus::INTERNAL_SERVER_ERROR.into()
+    }
+}
+
+unsafe extern "C" fn resolve_sync_done(ctx: *mut ngx_resolver_ctx_t) {
+    unsafe {
+        let state = &mut *((*ctx).data as *mut SyncResolve);
+        let request = Request::from_ngx_http_request(state.request);
+
+        let status: Status = if (*ctx).state == 0 {
+            request.add_header_out(
+                "X-time",
+                &format!(
+                    "{}",
+                    Instant::now().duration_since(state.start).as_secs_f32()
+                ),
+            );
+            HTTPStatus::NO_CONTENT.into()
+        } else {
+            ngx_log_error!(
+                NGX_LOG_ERR,
+                request.log(),
+                "sync resolver error: state={}",
+                (*ctx).state
+            );
+            HTTPStatus::INTERNAL_SERVER_ERROR.into()
+        };
+
+        let run_posted = (*ctx).async_() != 0;
+        let c = (*state.request).connection;
+
+        state.ctx = ptr::null_mut();
+        ngx_resolve_name_done(ctx);
+
+        ngx_http_finalize_request(state.request, status.0);
+
+        if run_posted {
+            ngx_http_run_posted_requests(c);
+        }
+    }
 }
 
 static REQWEST_CLIENT: LazyLock<Client> =
@@ -339,6 +451,9 @@ http_request_handler!(handler, |request: &mut http::Request| {
         }
         "/benchmark/resolve/tickle" => {
             tickle_request_handler!(resolve, request, start);
+        }
+        "/benchmark/resolve/sync" => {
+            return resolve_sync(request, start);
         }
         "/benchmark/hyper/ngx" => {
             ngx_request_handler!(hyper_client, request, IoImpl::Nginx, Spawn::Ngx, start);

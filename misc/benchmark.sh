@@ -182,6 +182,7 @@ resolve_group=$(
 	# leave 4. arg empty for ngx runs; it's not affected and we want an empty cell in csv
 	cat <<-'EOF'
 		resolve_ngx http://127.0.0.1:9000/benchmark/resolve/ngx 1
+		resolve_sync http://127.0.0.1:9000/benchmark/resolve/sync 1
 		resolve_tickle http://127.0.0.1:9000/benchmark/resolve/tickle 1 1
 		resolve_tickle http://127.0.0.1:9000/benchmark/resolve/tickle 8 8
 		resolve_tickle http://127.0.0.1:9000/benchmark/resolve/tickle 1024 1024
@@ -211,4 +212,4 @@ xan cat rows "$temp"/*.csv | xan sort -s name,mode,batch_size,rep -o "$out_file"
 xan view "$out_file"
 
 xan sort -s name,batch_size "$temp/heaptrack/heaptrack.csv" -o "$out_dir"/"$stamp"_heaptrack.csv
-xan view "$out_dir"/heaptrack.csv
+xan view "$out_dir"/"$stamp"_heaptrack.csv
