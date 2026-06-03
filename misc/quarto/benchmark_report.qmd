@@ -1,0 +1,425 @@
+---
+title: "ngx-tickle benchmarks"
+format: gfm
+execute:
+  echo: false
+  warning: false
+jupyter: python3
+---
+
+```{python}
+#| include: false
+# The crate version this benchmark snapshot corresponds to. A fixed literal, deliberately
+# NOT read from Cargo.toml: the report is a point-in-time measurement (the version-bump
+# commit hook doesn't re-run the benchmark), and it pins the docs.rs links to the release
+# where the `batch_size` API exists — it was `max_runnables_per_wakeup` up to 0.2.4.
+TICKLE_VERSION = "0.2.5"
+```
+
+[`ngx-tickle`] replaces ngx-rust's async task scheduler with one that **always enqueues**
+wakes to be run on the nginx event loop thread instead of running them inline. This
+allows wakers to be called safely from secondary threads, and enables using tokio
+runtimes alongside nginx.
+
+This report measures whether that costs throughput or latency, how the [`batch_size`]
+knob behaves, and how native nginx I/O compares to tokio I/O driven through the same
+scheduler.
+
+To that end, nginx-acme's [`PeerConnection`] implementation was imported, which brings
+in an nginx-native implementation of the hyper traits necessary for a client.
+
+## Summary
+
+Across a pure-async workload (resolve) and a mixed nginx-I/O-plus-async one (hyper),
+`tickle`'s scheduler matches ngx-rust's within a few percent at a sensible `batch_size`,
+adds no measurable heap, and keeps latencies tight. The one real decision is the I/O
+back-end — native nginx I/O is modestly faster than tokio I/O — and since both can be
+used with ngx-tickle, it's a per-use-case choice, not an upfront commitment.
+
+## Experiments
+
+### Resolve
+
+Using the existing [`Resolver`] Future, a name of the form
+`b{i:x}.fake.internal.` is resolved in an unbound server running on localhost.
+Unbound is configured to locally resolve any such query to the same response:
+
+```{.sourceCode filename="unbound.conf"}
+  local-data: 'fake.internal. 1 IN A 127.0.0.1'
+  local-zone: 'fake.internal.' redirect
+```
+
+The location is configured as follows:
+
+```{.sourceCode filename="benchmark.conf"}
+location /benchmark/ {
+    resolver 127.0.0.1:53 valid=1s ipv6=off;
+    benchmark on;
+}
+```
+
+`i` in the name template rotates back to 0 at 100_000.
+
+This circumvents the nginx resolver cache and same-query coalescing for request rates up
+to 100k rps. Every HTTP request corresponds to one DNS query.
+
+The handler then sets a response header with the elapsed time since task start and
+finalizes with HTTP 204.
+See [`resolve()`] for details.
+
+This async function is run with either [`ngx::async_::spawn()`] (`resolve/ngx`) or
+[`ngx_tickle::spawn()`] (`resolve/tickle`), and directly compared. No extra thread is
+involved in either case; everything stays on the nginx event loop thread.
+
+The `resolve/tickle` test is repeated with the batch sizes 1, 8 (library default), and
+1024 (representing ”unbounded” — the maximum batch size observed empirically is around
+60). The ”unbounded” batch size is closest to the behavior of [`ngx::async_::spawn()`],
+which runs most wakeups immediately inline, and does not try to pace async wakeups vs.
+nginx event loop turns in any way.
+
+### Hyper
+
+A hyper client is constructed with either [`PeerConnection`] or [`TokioIo`] IO
+implementations. The PeerConnection IO implementation uses either
+[`ngx::async_::spawn()`] (`hyper/ngx`) or [`ngx_tickle::spawn()`] (`hyper/tickle`) for
+_both_ the async handler task and hyper driver task. These tests don't involve any extra
+threads in either case, and should represent a fair comparison between the ngx and
+tickle schedulers.
+
+The TokioIo implementation uses [`ngx_tickle::spawn()`] for the async handler task, and
+the [`async-compat`] embedded runtime for the driver task (`hyper/tokio`). Note that
+this combination is impossible with [`ngx::async_::spawn()`] because it involves waking of
+the handler task from the compat runtime thread. Comparing these results with
+`hyper/tickle` should allow estimating the impact of a native nginx IO implementation
+versus a generic tokio-provided one, a secondary goal of this benchmark.
+
+The hyper client loads a [static JSON file] of non-trivial size that still fits in a
+single page (3.6 KiB), from _the same nginx server_. The async handler then decodes it
+using `serde_json` and records the total time in a response header.
+See [`hyper_client()`] for details.
+
+That design is deliberate: Loading from the same nginx server, and having the async task
+do some work after wakeup by actually parsing the file creates competition between nginx
+IO and async tasks.
+This creates a more realistic scenario than the “pure-async“ workload of the resolve
+tests, and can surface fairness issues between native nginx events and async tasks.
+
+- `hyper/tickle` vs `hyper/ngx` isolates the scheduler question.
+- `hyper/tickle` vs `hyper/tokio` isolates the I/O question.
+
+## Testing process
+
+The workload groups **resolve** and **hyper** are measured independently. Each goes
+through three passes, all driven with `wrk`/`wrk2` at `-t3 -c100` (3 threads, 100
+connections) for 120 s per run:
+
+1. **Saturate** — `wrk` runs flat-out to establish each variant's peak throughput.
+2. **Pace** — the group's lowest saturation rps × 0.7 sets a fixed request rate for a
+   `wrk2` run. `wrk2`'s open-loop pacing avoids *coordinated omission*: a closed-loop
+   generator like `wrk` pauses sending while it waits out a stall, so it never records
+   the latency of the requests it didn't send — hiding the tail.
+3. **Heap** — the saturating `wrk` pass is repeated with nginx started under
+   `heaptrack`; peak consumption is read back from `heaptrack_print`.
+
+Each pass is repeated 3 times, against a fresh nginx instance per repetition. The paced
+`wrk2` graphs use the per-percentile median across the three reps.
+
+## Experiment set-up
+
+- **Host:** DigitalOcean `c-8` — 8 dedicated vCPU, Intel Xeon Platinum 8168 @ 2.70 GHz, NixOS
+- **Kernel:** 6.18.33
+- **ngx-tickle:** `{python} TICKLE_VERSION`
+- **nginx**: configured as single-process, no workers. See
+  [benchmark.conf](../../examples/prefix/conf/benchmark.conf) for details.
+
+```{python}
+#| include: false
+from pathlib import Path
+
+import altair as alt
+import polars as pl
+from IPython.display import display, Markdown
+
+alt.renderers.enable("png")
+
+pl.Config.set_tbl_rows(-1)
+pl.Config.set_tbl_cols(-1)
+pl.Config.set_tbl_formatting("MARKDOWN")
+pl.Config.set_tbl_width_chars(-1)
+pl.Config.set_tbl_hide_column_data_types(True)
+pl.Config.set_tbl_hide_dataframe_shape(True)
+
+ROOT = Path.cwd()
+DATA = ROOT / "data"
+RUN_CSV = DATA / "2026-06-01T21:22:58+00:00.csv"
+HEAP_CSV = DATA / "2026-06-01T21:22:58+00:00_heaptrack.csv"
+
+LABEL_ORDER = ["ngx", "tickle/1", "tickle/8", "tickle/1024",
+               "tokio/1", "tokio/8", "tokio/1024"]
+
+
+def derive(df: pl.DataFrame) -> pl.DataFrame:
+    """workload / sched / variant labels from the `name` column."""
+    return df.with_columns(
+        pl.col("name").str.extract(r"^([a-z]+)_").alias("workload"),
+        pl.col("name").str.extract(r"_([a-z]+)$").alias("sched"),
+    ).with_columns(
+        pl.when(pl.col("batch_size").is_null())
+        .then(pl.col("sched"))
+        .otherwise(pl.col("sched") + "/" + pl.col("batch_size").cast(pl.Utf8))
+        .alias("variant")
+    )
+
+
+# batch_size / r are empty on some rows -> null under an Int64 override.
+df = derive(pl.read_csv(RUN_CSV, schema_overrides={"batch_size": pl.Int64, "r": pl.Int64}))
+# The `sync` resolve variant (raw nginx resolver callback, no async task) is held out of
+# the main scheduler/I/O comparison and discussed on its own in the appendix.
+sat = df.filter((pl.col("mode") == "wrk") & (pl.col("variant") != "sync"))
+paced = df.filter((pl.col("mode") == "wrk2") & (pl.col("variant") != "sync"))
+```
+
+```{python}
+sat_agg = (
+    sat.group_by("workload", "variant")
+    .agg(
+        pl.col("rps").median().alias("rps"),
+        pl.col("rps").min().alias("rps_lo"),
+        pl.col("rps").max().alias("rps_hi"),
+    )
+    .sort("workload", "variant")
+)
+```
+
+## Results
+
+### 1. Scheduler overhead — how does tickle throughput compare to ngx-rust?
+
+**It's competitive.** On both workloads `tickle` matches `ngx`'s spawn within a few
+percent at an appropriate `batch_size`:
+
+- **resolve**: `tickle/8` (the default, ~29.7k) ties `ngx` (~30.0k) within ~1%; the
+  batch extremes spread either side — `tickle/1024` ~33.5k, `tickle/1` ~23.8k (see the
+  caveat below).
+- **hyper**: `ngx` (~3.99k) ≈ `tickle/1` (~4.13k); the other batch sizes sit within
+  ~3%.
+
+
+::: {.callout-note}
+The resolve test's throughput numbers should be taken with a grain of salt — the
+fact that the handler is not doing any work after the completed resolution, and that
+there is no competing load on nginx otherwise makes it an ideal case for aggressive
+batching.
+
+The hyper test is more realistic and shows no such effect — if anything the smaller batch
+sizes do slightly better there, which §2 picks up.
+:::
+
+```{python}
+sat_table = (
+    sat_agg.select(
+        "workload", "variant",
+        pl.col("rps").round().cast(pl.Int64).alias("sat rps"),
+    )
+    .with_columns(pl.col("variant").cast(pl.Enum(LABEL_ORDER)))
+    .sort("workload", "variant")
+)
+display(Markdown(repr(sat_table)))
+```
+
+```{python}
+def throughput_chart(workload: str) -> alt.Chart:
+    d = sat_agg.filter(pl.col("workload") == workload)
+    x = alt.X("variant:N", sort=LABEL_ORDER, title=None)
+    bars = alt.Chart(d).mark_bar().encode(x=x, y=alt.Y("rps:Q", title="requests/sec"))
+    err = alt.Chart(d).mark_rule(color="black").encode(x=x, y="rps_lo:Q", y2="rps_hi:Q")
+    return (bars + err).properties(title=f"{workload}: saturation throughput", width=460, height=300)
+
+
+display(throughput_chart("resolve"))
+display(throughput_chart("hyper"))
+```
+
+### 2. The `batch_size` knob — fairness vs throughput, and it points *both ways*
+
+`batch_size` caps how many runnables a wake drains before returning to the event
+loop. Low = finer interleaving with nginx's own work; high = less scheduling overhead,
+and fewer wakeup syscalls — pending wakes coalesce into a single `eventfd` write, though
+the re-schedule when a wake hits the batch limit can't be coalesced. Which one wins is
+**workload-dependent, and the two workloads disagree**:
+
+- **resolve (exclusive)**: throughput rises monotonically with batch
+  (~23.8k → ~29.7k → ~33.5k). And the paced latencies below show `tickle/1` paying for
+  the coarse cycling: a median p99 of ~16 ms — with a wide rep spread (8–38 ms across
+  the three reps, one rep's p99.9 near 90 ms) — against ~2.7 ms for every other variant.
+  At this open-loop rate, draining a single runnable per wake makes the tail latency
+  erratic. Its closed-loop “saturation” number hides this, because coordinated omission
+  masks the tail. Here, bigger batch is strictly better on *both* axes.
+- **hyper (self-loopback, mixed)**: throughput *falls* then flattens with batch
+  (~4.13k → ~3.93k → ~3.93k) — finer interleaving lets nginx's own upstream-serving
+  work proceed between async drains. Here, smaller batch wins (paced tails stay tight
+  across all three).
+
+The *size* of that `tickle/1` tail is genuinely surprising — far bigger than the
+throughput gap alone would predict, and noisy across reps. The leading hypothesis is
+the “anemic” task: with almost no work per request, `resolve` runs at a very high request
+— and therefore wake — rate, and at `batch_size=1` each wake is its own event-loop
+round-trip, leaving little slack. A transient stall then can't be absorbed by draining a
+larger batch; paced arrivals pile up, and `wrk2`'s coordinated-omission correction
+records the whole backlog. A heavier per-request task (as in `hyper`) lowers the rate,
+which is likely why `hyper/1` shows none of this. This is a hypothesis, not a confirmed
+mechanism.
+
+The takeaway isn't "pick N"; it's that the optimal point is workload-specific and
+can invert. The default `batch_size=8` lands in the clean middle on both workloads.
+
+```{python}
+PCTL_COLS = ["50%", "90%", "99%", "99.9%"]
+paced_long = (
+    paced.unpivot(
+        index=["workload", "variant", "rep"], on=PCTL_COLS,
+        variable_name="pctl_s", value_name="us",
+    )
+    .with_columns(
+        (pl.col("us") / 1000.0).alias("ms"),
+        pl.when(pl.col("pctl_s") == "50%").then(50.0)
+        .when(pl.col("pctl_s") == "90%").then(90.0)
+        .when(pl.col("pctl_s") == "99%").then(99.0)
+        .when(pl.col("pctl_s") == "99.9%").then(99.9)
+        .alias("pctl"),
+    )
+    .group_by("workload", "variant", "pctl")
+    .agg(pl.col("ms").median().alias("ms"))  # per-percentile median across reps
+    .sort("workload", "variant", "pctl")
+)
+display(Markdown(repr(paced_long.pivot(values="ms", index=["workload", "variant"], on="pctl").sort("workload", "variant"))))
+```
+
+```{python}
+def latency_chart(workload: str) -> alt.Chart:
+    d = paced_long.filter(pl.col("workload") == workload)
+    return (
+        alt.Chart(d)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("pctl:O", title="percentile"),
+            y=alt.Y("ms:Q", scale=alt.Scale(type="log"), title="latency (ms, log)"),
+            color=alt.Color("variant:N", sort=LABEL_ORDER, title="variant"),
+        )
+        .properties(title=f"{workload}: paced latency @ R=0.7×min(sat)", width=520, height=320)
+    )
+
+
+display(latency_chart("resolve"))
+
+display(latency_chart("hyper"))
+```
+
+### 3. I/O back-end — native nginx vs tokio I/O
+
+Holding the scheduler fixed (`tickle`) and varying only I/O, **native nginx I/O is
+~7–8% faster** in saturation (e.g. bs=1: 4.13k vs 3.84k; bs=8: 3.93k vs 3.65k) and
+has a lower paced tail (~2.7 ms p99 vs ~3.4 ms at bs=1). Surprisingly, native also uses
+*more* heap (~6 MB vs ~4.5 MB — see *Peak heap* below).
+
+*Read*: native I/O wins modestly on this workload. When maximum performance is
+required, writing nginx-specific futures instead of using generic tokio ones is worth the
+effort. Otherwise, or when there are no nginx-native alternatives readily
+available, using generic implementations from tokio (or libraries using them, like
+[`reqwest`]) might be enough.
+
+### 4. Peak heap
+
+Peak heap is **scheduler-independent**:
+
+- **hyper**: `ngx` 6.12 MB ≈ `tickle` 6.05–6.10 MB, *flat* across batch_size — the
+  scheduler adds no measurable footprint. `tokio` I/O uses less heap (~4.5 MB) than
+  native (~6 MB) (which is surprising, but was not further investigated this time)
+- **resolve**: every variant — `ngx`, `sync`, and all three `tickle` batch sizes —
+  sits at **~22.1 MB**. Over the 120 s run each
+  cycles the full 100k-name ring, so the nginx resolver cache fills to its cardinality
+  cap (~100k nodes at ~220 B each). That ceiling is set by the test's name ring, not by
+  the scheduler or the async layer — a real workload with few distinct names wouldn't
+  pay it — and it lands in the same place regardless of which spawn or batch size drives
+  the lookups.
+
+*Read*: Neither scheduler incurs a measurable heap cost — expected, since the scheduler
+only ever holds `Runnable`s queued in a channel, and a `Runnable` (like its `Task<T>`
+handle) is just a single pointer into the task's one heap allocation. That allocation
+exists regardless of which scheduler drives it.
+
+```{python}
+suffix = pl.col("peak_heap").str.extract(r"([KMG])")
+mult = (
+    pl.when(suffix == "K").then(1e3)
+    .when(suffix == "M").then(1e6)
+    .when(suffix == "G").then(1e9)
+    .otherwise(1.0)
+)
+heap = derive(pl.read_csv(HEAP_CSV, schema_overrides={"batch_size": pl.Int64})).filter(
+    pl.col("variant") != "sync"
+).with_columns(
+    (pl.col("peak_heap").str.extract(r"([0-9.]+)").cast(pl.Float64) * mult / 1e6).alias("peak_mb"),
+    pl.col("variant").cast(pl.Enum(LABEL_ORDER)),
+).sort("workload", "variant")
+display(Markdown(repr(heap.select("workload", "variant", "peak_heap", "peak_mb"))))
+```
+
+```{python}
+def heap_chart() -> alt.Chart:
+    return (
+        alt.Chart(heap)
+        .mark_bar()
+        .encode(
+            x=alt.X("variant:N", sort=LABEL_ORDER, title=None),
+            y=alt.Y("peak_mb:Q", title="peak heap (MB)"),
+            color=alt.Color("workload:N", title="workload"),
+            column=alt.Column("workload:N", title=None),
+        )
+        .properties(title="peak heap consumption", width=300, height=300)
+        .resolve_scale(x="independent", y="independent")
+    )
+
+
+heap_chart()
+```
+
+## Appendix — raw data
+
+**wrk**
+
+```{python}
+display(Markdown(repr(
+    pl.read_csv(RUN_CSV, schema_overrides={"batch_size": pl.Int64, "r": pl.Int64})
+    .filter(pl.col("name") != "resolve_sync")
+)))
+
+```
+
+**heaptrack**
+
+```{python}
+display(Markdown(repr(
+    pl.read_csv(HEAP_CSV, schema_overrides={"batch_size": pl.Int64, "r": pl.Int64})
+    .filter(pl.col("name") != "resolve_sync")
+)))
+
+```
+
+```{python}
+#| output: asis
+# Version-pinned ngx-tickle docs links.
+print(f"[`batch_size`]: https://docs.rs/ngx-tickle/{TICKLE_VERSION}/ngx_tickle/fn.set_batch_size.html")
+print(f"[`ngx_tickle::spawn()`]: https://docs.rs/ngx-tickle/{TICKLE_VERSION}/ngx_tickle/fn.spawn.html")
+```
+
+[`ngx-tickle`]: https://crates.io/crates/ngx-tickle
+[`PeerConnection`]: https://github.com/nginx/nginx-acme/blob/main/src/net/peer_conn.rs
+[`Resolver`]: https://docs.rs/ngx/0.5.1/ngx/async_/resolver/struct.Resolver.html
+[`ngx::async_::spawn()`]: https://docs.rs/ngx/0.5.1/ngx/async_/fn.spawn.html
+[`TokioIo`]: https://docs.rs/hyper-util/0.1.20/hyper_util/rt/tokio/struct.TokioIo.html
+[`async-compat`]: https://crates.io/crates/async-compat
+[`resolve()`]: ../../examples/benchmark.rs
+[`hyper_client()`]: ../../examples/benchmark.rs
+[static JSON file]: ../../examples/prefix/html/example.json
+[`reqwest`]: https://crates.io/crates/reqwest

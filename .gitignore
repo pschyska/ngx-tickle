@@ -5,3 +5,6 @@
 .direnv
 
 CLAUDE.md
+
+benchmark_data/
+misc/preview.html

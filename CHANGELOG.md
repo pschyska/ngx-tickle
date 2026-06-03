@@ -2,6 +2,12 @@
 
 ## [unreleased]
 
+### Added
+- benchmark harness and report pipeline
+
+### Changed
+- rename set_max_runnables_per_wakeup to batch_size for clarity
+
 ## [0.2.4]
 
 ### Fixed
@@ -14,6 +20,10 @@
 - close a lost-wakeup window introduced by tickle coalescing
 
 ## [0.2.2]
+
+### Added
+- tickle coalescing: avoid notify if none is necessary, because the async_handler is
+  already pending
 
 ### Fixed
 - recursive-poll self-deadlock when a future invokes a `Waker` for another task while

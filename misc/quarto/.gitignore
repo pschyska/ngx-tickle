@@ -1,0 +1,6 @@
+/.quarto/
+/_freeze
+
+**/*.quarto_ipynb*
+
+**/*.quarto_ipynb
