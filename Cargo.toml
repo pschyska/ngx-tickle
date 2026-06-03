@@ -23,6 +23,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 autoexamples = false
+exclude = ["misc/quarto"]
 
 [features]
 default = []
