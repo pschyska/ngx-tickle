@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+## [0.2.5]
+
 ### Added
 - benchmark harness and report pipeline
 
@@ -64,7 +66,8 @@
 
 - Initial public release of spawn(), Scheduler and eventfd notify implementation
 
-[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.4...HEAD
+[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.5...HEAD
+[0.2.5]: https://github.com/pschyska/ngx-tickle/compare/0.2.4...0.2.5
 [0.2.4]: https://github.com/pschyska/ngx-tickle/compare/0.2.3...0.2.4
 [0.2.3]: https://github.com/pschyska/ngx-tickle/compare/0.2.2...0.2.3
 [0.2.2]: https://github.com/pschyska/ngx-tickle/compare/0.2.1...0.2.2
