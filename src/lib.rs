@@ -95,3 +95,11 @@ mod notify;
 mod spawn;
 pub use spawn::{RequestSpawn, RequestTask, Task, set_batch_size, spawn};
 pub mod prelude;
+
+macro_rules! tickle_abort {
+    ($($arg:tt)+ ) => {{
+        ::ngx::ngx_log_error!(::nginx_sys::NGX_LOG_ALERT, ::ngx::log::ngx_cycle_log().as_ptr(), $($arg)+);
+        unsafe { ::libc::abort() }
+    }}
+}
+pub(crate) use tickle_abort;

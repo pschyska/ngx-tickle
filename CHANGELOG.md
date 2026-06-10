@@ -2,6 +2,10 @@
 
 ## [unreleased]
 
+### Fixed
+- selfpipe: use `pipe`/`fcntl`, as `pipe2` is not available on osx
+- don't panic!, abort instead
+
 ## [0.2.5]
 
 ### Added

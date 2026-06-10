@@ -534,7 +534,9 @@ extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
         env::var("TICKLE_BATCH_SIZE")
             .unwrap_or("8".to_string())
             .parse()
-            .unwrap_or_else(|e| panic!("invalid TICKLE_BATCH_SIZE: {e}")),
+            .unwrap_or_else(|e| {
+                panic!("invalid TICKLE_BATCH_SIZE: {e}");
+            }),
     );
 
     Status::NGX_OK.into()
