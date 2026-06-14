@@ -24,6 +24,10 @@ ngx::http_request_handler!(access_phase_handler, |request: &mut ngx::http::Reque
 
     ngx::core::Status::NGX_AGAIN
 });
+
+// ngx-tickle must be initialized once per worker, before the first spawn() — call this
+// from your module's init_process. See ngx_tickle::init() for the module wiring.
+ngx_tickle::init();
 ```
 
 ## When do I need this?
@@ -76,8 +80,11 @@ the impact of `batch_size` tuning.
 
 ## For ngx-rust users
 
-`ngx::async_::spawn` calls translate one-for-one to [`spawn()`]. The synopsis above
-also shows `request.spawn`, the new request-bound entry point.
+> [!NOTE]
+> Since ngx-tickle 0.3.0, it is required to call [`init()`] in your module's [`init_process`]
+
+After initialization, `ngx::async_::spawn` calls translate one-for-one to [`spawn()`].
+The synopsis above also shows `request.spawn`, the new request-bound entry point.
 
 ## License
 
@@ -99,6 +106,8 @@ ngx-tickle is distributed under the terms of the [MIT license](LICENSE-MIT), or 
 [`async-compat`]: https://docs.rs/async-compat/latest/async_compat/
 [`tokio`]: https://docs.rs/tokio/latest/tokio/
 [`spawn()`]: https://docs.rs/ngx-tickle/0.2.5/ngx_tickle/fn.spawn.html
+[`init()`]: https://docs.rs/ngx-tickle/0.2.5/ngx_tickle/fn.init.html
+[`init_process`]: https://nginx.org/en/docs/dev/development_guide.html#core_modules
 [`async_task`]: https://docs.rs/async-task/latest/async_task/
 [`ngx::http::Request`]: https://docs.rs/ngx/latest/ngx/http/struct.Request.html
 [`compat.rs`]: https://github.com/pschyska/ngx-tickle/blob/main/examples/compat.rs

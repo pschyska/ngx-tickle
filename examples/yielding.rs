@@ -53,14 +53,8 @@ async fn yielding_handler(request: &mut Request) -> Result<()> {
 
 // used in ngx_module_t definition below
 extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
-    let process = unsafe { nginx_sys::ngx_process } as u32;
-    // don't run for master process
-    if !matches!(
-        process,
-        nginx_sys::NGX_PROCESS_SINGLE | nginx_sys::NGX_PROCESS_WORKER
-    ) {
-        return Status::NGX_OK.into();
-    }
+    // Initialize ngx-tickle for this worker before any spawn().
+    ngx_tickle::init();
 
     // The queue limits the maximum number of runnables run per wakeup to not starve nginx I/O
     // events. The default of 8 can be changed like this.

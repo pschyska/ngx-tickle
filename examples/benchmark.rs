@@ -521,20 +521,16 @@ static MODULE_CTX: ngx_http_module_t = ngx_http_module_t {
 
 // hook to init worker, see also module setup below
 extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
-    let process = unsafe { nginx_sys::ngx_process } as u32;
-    // don't run for master process
-    if !matches!(
-        process,
-        nginx_sys::NGX_PROCESS_SINGLE | nginx_sys::NGX_PROCESS_WORKER
-    ) {
-        return Status::NGX_OK.into();
-    }
+    // Initialize ngx-tickle for this worker before any spawn().
+    ngx_tickle::init();
 
     set_batch_size(
         env::var("TICKLE_BATCH_SIZE")
             .unwrap_or("8".to_string())
             .parse()
-            .unwrap_or_else(|e| panic!("invalid TICKLE_BATCH_SIZE: {e}")),
+            .unwrap_or_else(|e| {
+                panic!("invalid TICKLE_BATCH_SIZE: {e}");
+            }),
     );
 
     Status::NGX_OK.into()

@@ -2,6 +2,17 @@
 
 ## [unreleased]
 
+### Changed
+- **BREAKING:** `ngx_tickle::init()` is now mandatory — call it once per worker from your
+  module's `init_process`, before the first `spawn()`/`request.spawn()`. The scheduler no
+  longer initializes lazily on first use, which could register its wakeup fd from the
+  wrong process (a pre-`fork()` spawn in the master) or from a secondary thread. See the
+  `init()` docs for the wiring.
+
+### Fixed
+- selfpipe: use `pipe`/`fcntl`, as `pipe2` is not available on osx
+- don't panic!, abort instead
+
 ## [0.2.5]
 
 ### Added

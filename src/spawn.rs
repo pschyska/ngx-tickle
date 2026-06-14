@@ -10,10 +10,10 @@ use async_task::Runnable;
 /// top-level task. For request-bound tasks see [`RequestTask`].
 pub use async_task::Task;
 use crossbeam_channel::{Receiver, Sender, unbounded};
-use nginx_sys::ngx_event_t;
+use nginx_sys::{NGX_LOG_ALERT, ngx_event_t};
 use ngx::http::Request;
 use ngx::log::ngx_cycle_log;
-use ngx::ngx_log_debug;
+use ngx::{ngx_log_debug, ngx_log_error};
 
 use crate::notify::*;
 
@@ -90,7 +90,14 @@ fn scheduler() -> &'static Scheduler {
 /// non-reentrant lock like `std::Mutex` is held — a common pattern in connection-pool
 /// `Drop` impls).
 fn schedule(runnable: Runnable) {
-    scheduler().tx.send(runnable).expect("send");
+    if let Err(e) = scheduler().tx.send(runnable) {
+        ngx_log_error!(
+            NGX_LOG_ALERT,
+            ngx_cycle_log().as_ptr(),
+            "tickle: error scheduling Runnable: {e:?}"
+        );
+        return;
+    }
     // Tickle coalescing: only the thread that flips `false → true` writes to eventfd; subsequent
     // schedules with TICKLED already `true` skip the syscall — nginx already has a pending event
     // that will drain the channel.

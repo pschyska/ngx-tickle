@@ -2,6 +2,11 @@
 #![warn(missing_docs)]
 #![doc = include_str!("../README.md")]
 //!
+//! # Initialization
+//!
+//! Call [`init()`] once per worker, before the first spawn, from your module's
+//! `init_process` handler. See [`init()`] for why this is required and a wiring example.
+//!
 //! # Spawning tasks
 //!
 //! Most users will want `use ngx_tickle::prelude::*;` to bring the common items into
@@ -95,3 +100,52 @@ mod notify;
 mod spawn;
 pub use spawn::{RequestSpawn, RequestTask, Task, set_batch_size, spawn};
 pub mod prelude;
+
+/// Initialize ngx-tickle for the current worker process.
+///
+/// Call this **once per worker, before the first [`spawn()`] / [`RequestSpawn::spawn()`]**,
+/// from your module's `init_process` handler. nginx runs `init_process` on the worker's
+/// main thread right after `fork()` — the only safe place to register ngx-tickle's wakeup
+/// fd (an `eventfd`, or a self-pipe) on *this* worker's event loop.
+///
+/// Once `init()` has run, spawning Tasks (and consuming Wakers) is safe from any thread.
+///
+/// # Example
+///
+/// ```ignore
+/// use ngx::core::Status;
+/// use ngx::ffi::{ngx_cycle_t, ngx_int_t, ngx_module_t};
+///
+/// extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
+///     ngx_tickle::init();
+///     Status::NGX_OK.into()
+/// }
+///
+/// #[used]
+/// #[allow(non_upper_case_globals)]
+/// pub static mut ngx_http_your_module: ngx_module_t = ngx_module_t {
+///     init_process: Some(init_process),
+///     // … the rest of your module definition …
+///     ..ngx_module_t::default()
+/// };
+/// ```
+pub fn init() {
+    let process = unsafe { nginx_sys::ngx_process } as u32;
+    if !matches!(
+        process,
+        nginx_sys::NGX_PROCESS_SINGLE | nginx_sys::NGX_PROCESS_WORKER
+    ) {
+        crate::tickle_abort!(
+            "tickle: ngx_tickle::init() must be called from a worker process (your module's init_process); ngx_process={process}"
+        );
+    }
+    notify::init();
+}
+
+macro_rules! tickle_abort {
+    ($($arg:tt)+ ) => {{
+        ::ngx::ngx_log_error!(::nginx_sys::NGX_LOG_ALERT, ::ngx::log::ngx_cycle_log().as_ptr(), $($arg)+);
+        unsafe { ::libc::abort() }
+    }}
+}
+pub(crate) use tickle_abort;
