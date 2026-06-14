@@ -9,7 +9,7 @@ use nginx_sys::NGX_LOG_ERR;
 use ngx::core::Status;
 use ngx::ffi::{
     NGX_CONF_TAKE1, NGX_HTTP_LOC_CONF, NGX_HTTP_LOC_CONF_OFFSET, NGX_HTTP_MODULE, NGX_LOG_EMERG,
-    ngx_array_push, ngx_command_t, ngx_conf_t, ngx_http_handler_pt, ngx_http_module_t,
+    ngx_array_push, ngx_command_t, ngx_conf_t, ngx_cycle_t, ngx_http_handler_pt, ngx_http_module_t,
     ngx_http_phases_NGX_HTTP_PRECONTENT_PHASE, ngx_int_t, ngx_module_t, ngx_str_t, ngx_uint_t,
 };
 use ngx::http::{self, HTTPStatus, HttpModule, MergeConfigError, Request};
@@ -163,12 +163,19 @@ static MODULE_CTX: ngx_http_module_t = ngx_http_module_t {
     merge_loc_conf: Some(Module::merge_loc_conf),
 };
 
+extern "C" fn init_process(_cycle: *mut ngx_cycle_t) -> ngx_int_t {
+    // Initialize ngx-tickle for this worker before any spawn().
+    ngx_tickle::init();
+    Status::NGX_OK.into()
+}
+
 #[used]
 #[allow(non_upper_case_globals)]
 pub static mut sidecar_example: ngx_module_t = ngx_module_t {
     ctx: &raw const MODULE_CTX as _,
     commands: unsafe { &COMMANDS[0] as *const _ as *mut _ },
     type_: NGX_HTTP_MODULE as _,
+    init_process: Some(init_process),
     ..ngx_module_t::default()
 };
 ngx_modules!(sidecar_example);

@@ -70,7 +70,11 @@ fn make_pipe() -> [c_int; 2] {
     fds
 }
 
-fn ensure_init() {
+/// Register the wakeup self-pipe on this worker's event loop. Idempotent. Must run on the
+/// nginx main thread, in a worker/single process — see [`crate::init`], which guards the
+/// process type and is the only caller.
+#[allow(dead_code)]
+pub(crate) fn init() {
     let _ = INIT.get_or_init(|| {
         let fds = make_pipe();
         let read_fd = fds[0];
@@ -100,7 +104,21 @@ fn ensure_init() {
         if rc != NGX_OK as isize {
             tickle_abort!("tickle: ngx_add_event == {rc}");
         }
+
+        ngx_log_debug!(log, "tickle: initialized (self-pipe)");
     });
+}
+
+/// Abort if [`init`] hasn't run in this process. Called on the wakeup path instead of
+/// lazily initializing, so a missing `ngx_tickle::init()` (or a `spawn()` in the master
+/// process) fails loudly rather than registering the fds from the wrong thread/process.
+#[allow(dead_code)]
+fn expect_init() {
+    if INIT.get().is_none() {
+        tickle_abort!(
+            "tickle: not initialized — call ngx_tickle::init() from your module's init_process (see ngx_tickle::init docs)"
+        );
+    }
 }
 
 fn is_again(errno: Option<i32>) -> bool {
@@ -109,7 +127,7 @@ fn is_again(errno: Option<i32>) -> bool {
 
 #[allow(dead_code)]
 pub(crate) fn tickle() {
-    ensure_init();
+    expect_init();
 
     let byte: u8 = 1;
     let ptr = &byte as *const u8 as *const c_void;

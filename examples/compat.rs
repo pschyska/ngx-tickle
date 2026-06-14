@@ -82,14 +82,8 @@ async fn compat_handler(request: &mut Request) -> Result<()> {
 
 // hook to init worker, see also module setup below
 extern "C" fn init_process(cycle: *mut ngx_cycle_t) -> ngx_int_t {
-    let process = unsafe { nginx_sys::ngx_process } as u32;
-    // don't run for master process
-    if !matches!(
-        process,
-        nginx_sys::NGX_PROCESS_SINGLE | nginx_sys::NGX_PROCESS_WORKER
-    ) {
-        return Status::NGX_OK.into();
-    }
+    // Initialize ngx-tickle for this worker before any spawn().
+    ngx_tickle::init();
 
     // To start a background task, use top-level spawn and `.detach()` the Task, so it keeps
     // running.
