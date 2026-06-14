@@ -1,5 +1,5 @@
 [![crates.io](https://img.shields.io/crates/v/ngx-tickle)](https://crates.io/crates/ngx-tickle)
-[![docs.rs](https://img.shields.io/docsrs/ngx-tickle/0.2.5)](https://docs.rs/ngx-tickle/0.2.5/ngx_tickle/)
+[![docs.rs](https://img.shields.io/docsrs/ngx-tickle/0.3.0)](https://docs.rs/ngx-tickle/0.3.0/ngx_tickle/)
 
 # ngx-tickle
 
@@ -105,8 +105,8 @@ ngx-tickle is distributed under the terms of the [MIT license](LICENSE-MIT), or 
 [`ngx::async_::spawn()`]: https://docs.rs/ngx/latest/ngx/async_/fn.spawn.html
 [`async-compat`]: https://docs.rs/async-compat/latest/async_compat/
 [`tokio`]: https://docs.rs/tokio/latest/tokio/
-[`spawn()`]: https://docs.rs/ngx-tickle/0.2.5/ngx_tickle/fn.spawn.html
-[`init()`]: https://docs.rs/ngx-tickle/0.2.5/ngx_tickle/fn.init.html
+[`spawn()`]: https://docs.rs/ngx-tickle/0.3.0/ngx_tickle/fn.spawn.html
+[`init()`]: https://docs.rs/ngx-tickle/0.3.0/ngx_tickle/fn.init.html
 [`init_process`]: https://nginx.org/en/docs/dev/development_guide.html#core_modules
 [`async_task`]: https://docs.rs/async-task/latest/async_task/
 [`ngx::http::Request`]: https://docs.rs/ngx/latest/ngx/http/struct.Request.html

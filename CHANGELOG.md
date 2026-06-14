@@ -2,6 +2,8 @@
 
 ## [unreleased]
 
+## [0.3.0]
+
 ### Changed
 - **BREAKING:** `ngx_tickle::init()` is now mandatory — call it once per worker from your
   module's `init_process`, before the first `spawn()`/`request.spawn()`. The scheduler no
@@ -77,7 +79,8 @@
 
 - Initial public release of spawn(), Scheduler and eventfd notify implementation
 
-[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.2.5...HEAD
+[unreleased]: https://github.com/pschyska/ngx-tickle/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/pschyska/ngx-tickle/compare/0.2.5...0.3.0
 [0.2.5]: https://github.com/pschyska/ngx-tickle/compare/0.2.4...0.2.5
 [0.2.4]: https://github.com/pschyska/ngx-tickle/compare/0.2.3...0.2.4
 [0.2.3]: https://github.com/pschyska/ngx-tickle/compare/0.2.2...0.2.3
